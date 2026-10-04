@@ -5,7 +5,7 @@ description = "Voice AI agent starter with a fintech-grade safeguard layer: Pipe
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
-authors = [{ name = "Corey Mathie", email = "Coremathie@gmail.com" }]
+authors = [{ name = "Corey Mathie" }]
 keywords = ["voice-ai", "pipecat", "twilio", "openai", "realtime", "serverless", "aws-lambda", "ai-agent"]
 
 [tool.ruff]
