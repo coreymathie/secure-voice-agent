@@ -59,6 +59,12 @@ flyctl deploy
 
 If the Fly hostname differs from what you passed to SAM, redeploy SAM with the right `AgentPublicWsUrl`.
 
+Optional on the voice process: the policy gate's limits (`POLICY_*`, defaults in `.env.example`) and tracing (`OTEL_EXPORTER_OTLP_ENDPOINT`, see [`observability.md`](observability.md)). Set them with `flyctl secrets set` like the rest.
+
+**Signing secret:** add `TOOL_API_SECRET` (a long random string, e.g. `openssl rand -hex 32`) to the Secrets Manager secret and set the same value on the voice process. Tool Lambdas reject every request that isn't signed with it (`401`), including all requests when the secret is missing. See [`adr/0003`](adr/0003-lambda-tools-long-lived-call-worker.md).
+
+**Step-up verification:** payments and contact changes need a caller verified by a one-time code (see [`auth.md`](auth.md)). Create a Twilio Verify service and set `TWILIO_VERIFY_SERVICE_SID` on the voice process, and implement `CrmLookup` in `src/safeguards/step_up.py` against your CRM (`CRM_LOOKUP_FILE` is for local development). Without both, high-tier tools hand off to a person. `POLICY_STEP_UP_MIN_TIER=off` turns step-up off.
+
 Post-call summaries use whichever model key is already set (`OPENAI_API_KEY` for the default provider). To choose explicitly, also set `SUMMARY_PROVIDER=anthropic` with `ANTHROPIC_API_KEY`, or `SUMMARY_PROVIDER=none` for rule-based notes only. Notes land on the caller's GoHighLevel contact when `GOHIGHLEVEL_API_KEY` is in the secret; otherwise they are kept in the audit log only.
 
 ## 4. Smoke test
