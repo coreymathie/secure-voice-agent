@@ -31,12 +31,21 @@ def fresh_state(tmp_path, monkeypatch):
     yield tmp_path / "audit.jsonl"
 
 
+def _verified():
+    """A call whose caller already passed step-up verification (high-tier tools need it)."""
+    from src.safeguards.policy_gate import CallPolicy
+
+    return CallPolicy(verified=True)
+
+
 def _audit_rows(path):
     return [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
 
 
 def test_specs_cover_every_executor():
-    assert set(tools.TOOL_NAMES) == set(tools.EXECUTORS)
+    # Lambda-backed tools have an HTTPS executor; step-up tools are bound per call (tools.step_up_executors).
+    assert set(tools.TOOL_NAMES) == set(tools.EXECUTORS) | set(tools.STEP_UP_TOOLS)
+    assert not set(tools.EXECUTORS) & set(tools.STEP_UP_TOOLS)
     for spec in tools.TOOL_SPECS:
         assert set(spec["required"]) <= set(spec["properties"])
 
@@ -75,7 +84,9 @@ async def test_payment_link_is_sent_to_caller_number():
         seen.update(args)
         return {"status": "link_sent"}
 
-    handler = tools.make_handler("take_payment", "+15555550100", executors={"take_payment": fake_exec})
+    handler = tools.make_handler(
+        "take_payment", "+15555550100", executors={"take_payment": fake_exec}, policy=_verified()
+    )
     params, _ = _params({"amount_usd": 40, "description": "Consult", "customer_email": "a@b.co"})
     await handler(params)
     assert seen["customer_phone"] == "+15555550100"
@@ -85,7 +96,9 @@ async def test_velocity_denies_second_rapid_payment(fresh_state):
     async def fake_exec(args, idem):
         return {"status": "link_sent"}
 
-    handler = tools.make_handler("take_payment", "+15550001111", executors={"take_payment": fake_exec})
+    handler = tools.make_handler(
+        "take_payment", "+15550001111", executors={"take_payment": fake_exec}, policy=_verified()
+    )
     p1, r1 = _params({"amount_usd": 10, "description": "x", "customer_email": "a@b.co"}, "c1")
     p2, r2 = _params({"amount_usd": 10, "description": "x", "customer_email": "a@b.co"}, "c2")
     await handler(p1)
