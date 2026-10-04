@@ -59,7 +59,7 @@ Added — the compliance half of a production voice agent.
 - `src/safeguards/velocity.py` — fintech-style velocity checks on
   state-changing tool calls (take_payment, book_meeting, create_ticket,
   log_lead). "Deny / flag / require_human" actions per rule. Pattern applied
-  from dispute/fraud operations work at Fundbox and Capital One.
+  from dispute/fraud operations work in fintech.
 - `docs/compliance.md` — HIPAA / SOC2-adjacent deployment notes drawn from
   client production experience.
 
