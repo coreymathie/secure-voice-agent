@@ -1,0 +1,153 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  voice-agent-starter: stateless Lambda handlers for the Twilio voice webhook and
+  the agent's tools. The long-lived Pipecat voice process is deployed separately
+  (Fly.io / ECS). Secrets come from one AWS Secrets Manager secret (see docs/deploy.md).
+
+Parameters:
+  AgentPublicWsUrl:
+    Type: String
+    Description: Public wss:// URL of the Pipecat agent's /stream endpoint (Fly.io / ECS)
+  SecretName:
+    Type: String
+    Default: voice-agent/prod
+    Description: Secrets Manager secret holding the API keys as JSON key/value pairs
+  BusinessTimezone:
+    Type: String
+    Default: America/New_York
+    Description: IANA time zone for bookings when the caller gives a local time
+
+Globals:
+  Function:
+    Runtime: python3.12
+    MemorySize: 512
+    Timeout: 20
+    Architectures: [arm64]
+    CodeUri: ../src/handlers/
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+        IDEMPOTENCY_TABLE: !Ref IdempotencyTable
+
+Resources:
+  IdempotencyTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: key
+          AttributeType: S
+      KeySchema:
+        - AttributeName: key
+          KeyType: HASH
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+
+  Api:
+    Type: AWS::Serverless::HttpApi
+    Properties:
+      StageName: prod
+
+  TwilioVoiceHook:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: twilio_voice_hook.handler
+      Environment:
+        Variables:
+          AGENT_PUBLIC_WS_URL: !Ref AgentPublicWsUrl
+          TWILIO_AUTH_TOKEN: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TWILIO_AUTH_TOKEN}}"
+      Events:
+        Voice:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /voice, Method: POST }
+
+  BookMeeting:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: book_meeting.handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+      Environment:
+        Variables:
+          GOOGLE_CALENDAR_ID: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:GOOGLE_CALENDAR_ID}}"
+          BUSINESS_TIMEZONE: !Ref BusinessTimezone
+          GOOGLE_SERVICE_ACCOUNT_JSON: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:GOOGLE_SERVICE_ACCOUNT_JSON}}"
+      Events:
+        Book:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /book_meeting, Method: POST }
+
+  TakePayment:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: take_payment.handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+      Environment:
+        Variables:
+          STRIPE_SECRET_KEY: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:STRIPE_SECRET_KEY}}"
+          TWILIO_ACCOUNT_SID: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TWILIO_ACCOUNT_SID}}"
+          TWILIO_AUTH_TOKEN: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TWILIO_AUTH_TOKEN}}"
+          TWILIO_PHONE_NUMBER: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TWILIO_PHONE_NUMBER}}"
+      Events:
+        Pay:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /take_payment, Method: POST }
+
+  CreateTicket:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: create_ticket.handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+      Environment:
+        Variables:
+          ZENDESK_SUBDOMAIN: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:ZENDESK_SUBDOMAIN}}"
+          ZENDESK_EMAIL: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:ZENDESK_EMAIL}}"
+          ZENDESK_API_TOKEN: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:ZENDESK_API_TOKEN}}"
+      Events:
+        Ticket:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /create_ticket, Method: POST }
+
+  LogLead:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: log_lead.handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+      Environment:
+        Variables:
+          GOHIGHLEVEL_API_KEY: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:GOHIGHLEVEL_API_KEY}}"
+          GOHIGHLEVEL_LOCATION_ID: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:GOHIGHLEVEL_LOCATION_ID}}"
+      Events:
+        Lead:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /log_lead, Method: POST }
+
+  CallSummary:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: call_summary.handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+      Environment:
+        Variables:
+          GOHIGHLEVEL_API_KEY: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:GOHIGHLEVEL_API_KEY}}"
+          GOHIGHLEVEL_LOCATION_ID: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:GOHIGHLEVEL_LOCATION_ID}}"
+      Events:
+        Summary:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /call_summary, Method: POST }
+
+Outputs:
+  ApiBaseUrl:
+    Description: Set this as LAMBDA_BASE_URL on the agent process
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod"
+  VoiceWebhookUrl:
+    Description: Paste into your Twilio number's Voice webhook (HTTP POST)
+    Value: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/voice"

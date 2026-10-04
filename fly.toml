@@ -1,0 +1,26 @@
+app = "voice-agent"
+primary_region = "mia"      # Miami — close to Florida
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  AGENT_HOST = "0.0.0.0"
+  AGENT_PORT = "8080"
+  PYTHONUNBUFFERED = "1"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = false      # voice sessions are long-lived
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[mounts]]
+  source = "audit"            # keep the audit log across deploys: flyctl volumes create audit --size 1 --region mia
+  destination = "/app/logs"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 1024

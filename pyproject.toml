@@ -1,0 +1,20 @@
+[project]
+name = "voice-agent-starter"
+version = "0.4.0"
+description = "Voice AI agent starter with a fintech-grade safeguard layer: Pipecat + Twilio + OpenAI Realtime + AWS Lambda"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Corey Mathie", email = "Coremathie@gmail.com" }]
+keywords = ["voice-ai", "pipecat", "twilio", "openai", "realtime", "serverless", "aws-lambda", "ai-agent"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "BLE", "UP", "RUF"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
