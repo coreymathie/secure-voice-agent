@@ -1,6 +1,6 @@
 # Compliance notes
 
-The patterns here come from two places: client voice-agent work in healthcare, legal, and real estate, and fraud and dispute operations at Capital One and Fundbox. In both, a system that leaks a caller's SSN to a public LLM, or logs a card number in plaintext, is a serious incident.
+The patterns here come from two places: client voice-agent work in healthcare, legal, and real estate, and fraud and dispute operations in fintech. In both, a system that leaks a caller's SSN to a public LLM, or logs a card number in plaintext, is a serious incident.
 
 The `src/safeguards/` module is the compact version of what those deployments actually need. This file explains how to use it, what it's good for, and what it isn't.
 
