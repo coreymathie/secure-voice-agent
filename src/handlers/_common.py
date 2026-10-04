@@ -10,17 +10,34 @@ race-safe across concurrent Lambda invocations. If the handler then fails, the
 claim is released so a legitimate retry can run. A successful call keeps the
 claim for 24 hours, so replays return "duplicate" instead of double-booking or
 double-charging.
+
+Request signing
+---------------
+Tool routes are public HTTPS endpoints, so a request is only trusted if it is
+signed by the voice process. The signature is HMAC-SHA256 over
+`timestamp.idempotency_key.body` with a shared secret (`TOOL_API_SECRET`):
+it binds the body (no tampering), the idempotency key (a captured request
+can't be replayed under a new key) and the time (requests older than
+`MAX_SKEW_SECONDS` are refused). Without a secret, handlers refuse every call
+unless `ALLOW_UNSIGNED_TOOL_CALLS=true` is set for local development.
 """
 
 from __future__ import annotations
 
+import base64
 import functools
+import hashlib
+import hmac
 import json
 import logging
 import os
 import time
 from collections.abc import Callable
 from typing import Any
+
+MAX_SKEW_SECONDS = 300
+SIGNATURE_HEADER = "X-Tool-Signature"
+TIMESTAMP_HEADER = "X-Tool-Timestamp"
 
 log = logging.getLogger(__name__)
 
@@ -80,16 +97,72 @@ def payload_of(event: dict[str, Any]) -> dict[str, Any]:
     return json.loads(body) if isinstance(body, str) else body
 
 
+def _headers(event: dict[str, Any]) -> dict[str, str]:
+    return {k.lower(): v for k, v in (event.get("headers") or {}).items()}
+
+
 def idempotency_key(event: dict[str, Any]) -> str | None:
-    headers = {k.lower(): v for k, v in (event.get("headers") or {}).items()}
-    return headers.get("idempotency-key")
+    return _headers(event).get("idempotency-key")
+
+
+def sign(secret: str, timestamp: str, idempotency_key: str, body: bytes) -> str:
+    """HMAC-SHA256 over `timestamp.idempotency_key.body`, hex, versioned."""
+    message = timestamp.encode() + b"." + idempotency_key.encode() + b"." + body
+    return "v1=" + hmac.new(secret.encode(), message, hashlib.sha256).hexdigest()
+
+
+def signed_headers(secret: str, idempotency_key: str, body: bytes, now: float | None = None) -> dict[str, str]:
+    """Headers the voice process sends with a tool request."""
+    ts = str(int(now if now is not None else time.time()))
+    return {
+        "Idempotency-Key": idempotency_key,
+        TIMESTAMP_HEADER: ts,
+        SIGNATURE_HEADER: sign(secret, ts, idempotency_key, body),
+    }
+
+
+def _raw_body(event: dict[str, Any]) -> bytes:
+    body = event.get("body")
+    if body is None:
+        return b""
+    if isinstance(body, str):
+        return base64.b64decode(body) if event.get("isBase64Encoded") else body.encode()
+    return json.dumps(body, separators=(",", ":")).encode()
+
+
+def verify_signature(event: dict[str, Any], now: float | None = None) -> str | None:
+    """Return None if the request is authentic, else a reason (logged, never sent to the caller)."""
+    secret = os.environ.get("TOOL_API_SECRET", "")
+    if not secret:
+        if os.environ.get("ALLOW_UNSIGNED_TOOL_CALLS", "").lower() == "true":
+            return None
+        return "TOOL_API_SECRET is not configured"
+    headers = _headers(event)
+    ts = headers.get(TIMESTAMP_HEADER.lower(), "")
+    sig = headers.get(SIGNATURE_HEADER.lower(), "")
+    if not ts or not sig:
+        return "missing signature"
+    try:
+        age = abs((now if now is not None else time.time()) - int(ts))
+    except ValueError:
+        return "invalid timestamp"
+    if age > MAX_SKEW_SECONDS:
+        return "stale timestamp"
+    expected = sign(secret, ts, headers.get("idempotency-key", ""), _raw_body(event))
+    if not hmac.compare_digest(expected, sig):
+        return "bad signature"
+    return None
 
 
 def idempotent(fn: Callable[[dict, Any], dict]) -> Callable[[dict, Any], dict]:
-    """Wrap a handler with claim-on-entry, release-on-failure idempotency."""
+    """Wrap a handler with signature verification, then claim-on-entry, release-on-failure idempotency."""
 
     @functools.wraps(fn)
     def wrapper(event, context):
+        problem = verify_signature(event)
+        if problem:
+            log.warning("rejected unsigned or invalid tool request: %s", problem)
+            return bad("unauthorized", 401)
         key = idempotency_key(event)
         if key and seen_before(key):
             return ok({"status": "duplicate", "message": "already handled"})
