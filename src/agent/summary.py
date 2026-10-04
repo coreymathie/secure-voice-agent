@@ -35,10 +35,24 @@ log = logging.getLogger(__name__)
 
 # The bot seeds the conversation with this so the agent greets first; it isn't the caller speaking.
 KICKOFF_MESSAGE = "The caller just connected. Greet them warmly and briefly."
+# After a keypad payment (Twilio <Pay>) the call reconnects on a new stream; this resumes the conversation.
+RESUME_PREFIX = "The caller is back from entering their card on the keypad."
+RESUME_KICKOFF = (
+    RESUME_PREFIX + " Payment result: {result}. Tell them the outcome in one short sentence and ask if they need "
+    "anything else. Never ask for card details."
+)
+
+
+def is_kickoff(text: str) -> bool:
+    """Messages the bot injects (start, resume, call-limit instructions); they aren't the caller speaking."""
+    from .call_limits import CONTROL_PREFIX
+
+    return text == KICKOFF_MESSAGE or text.startswith(RESUME_PREFIX) or text.startswith(CONTROL_PREFIX)
+
 
 OUTCOMES = ("resolved", "follow_up", "escalated", "abandoned")
 SENTIMENTS = ("positive", "neutral", "negative")
-SUCCESS_STATUSES = {"booked", "link_sent", "link_created", "created", "logged", "duplicate"}
+SUCCESS_STATUSES = {"booked", "link_sent", "link_created", "created", "logged", "duplicate", "updated", "keypad_paid"}
 
 SUMMARY_SCHEMA: dict[str, Any] = {
     "type": "object",
@@ -98,7 +112,7 @@ def transcript_from_messages(messages: list) -> list[tuple[str, str]]:
         if not isinstance(m, dict) or m.get("role") not in ("user", "assistant"):
             continue
         text = _text_of(m.get("content")).strip()
-        if text and text != KICKOFF_MESSAGE:
+        if text and not is_kickoff(text):
             turns.append((m["role"], text))
     return turns
 
@@ -270,11 +284,12 @@ async def deliver(
     own_client = client is None
     client = client or httpx.AsyncClient(timeout=15.0)
     try:
-        r = await client.post(
-            f"{base}/call_summary",
-            json={"call_sid": call_sid, "caller_phone": caller_id, **asdict(summary)},
-            headers={"Idempotency-Key": f"summary-{call_sid}"},
+        from .tools import tool_request
+
+        body, headers = tool_request(
+            {"call_sid": call_sid, "caller_phone": caller_id, **asdict(summary)}, f"summary-{call_sid}"
         )
+        r = await client.post(f"{base}/call_summary", content=body, headers=headers)
         r.raise_for_status()
         return r.json()
     except Exception as e:  # noqa: BLE001 - delivery failure must not crash call teardown
