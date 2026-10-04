@@ -35,10 +35,11 @@ _RULES: tuple[RedactionRule, ...] = (
         re.compile(r"\b(\d{3})[- ]?(\d{2})[- ]?(\d{4})\b"),
         "[REDACTED_SSN]",
     ),
-    # Credit card PAN — 13-19 digits with optional separators (Luhn-validated below)
+    # Credit card PAN — 13-19 digits with optional separators (Luhn-validated below).
+    # Ends on a digit so the separator after the number is kept ("4111 ... 1111 was" stays readable).
     RedactionRule(
         "pan",
-        re.compile(r"\b(?:\d[ -]?){13,19}\b"),
+        re.compile(r"\b(?:\d[ -]?){12,18}\d\b"),
         "[REDACTED_PAN]",
     ),
     # US bank routing (9 digits) + account (8-17 digits) when they appear together
@@ -120,3 +121,21 @@ def redact(text: str, allow: tuple[str, ...] = ()) -> tuple[str, dict[str, int]]
 
         out = rule.pattern.sub(_sub, out)
     return out, counts
+
+
+# Government and financial identifiers never leave the agent, even inside free text
+# such as a ticket body. Emails and phone numbers are kept: the tools need them.
+TOOL_ARG_ALLOW: tuple[str, ...] = ("email", "phone")
+
+
+def scrub_args(args: dict) -> tuple[dict, dict[str, int]]:
+    """Redact card numbers, SSNs, bank details, DOBs, and license numbers in string arguments."""
+    clean: dict = {}
+    counts: dict[str, int] = {}
+    for k, v in args.items():
+        if isinstance(v, str):
+            v, c = redact(v, allow=TOOL_ARG_ALLOW)
+            for rule, n in c.items():
+                counts[rule] = counts.get(rule, 0) + n
+        clean[k] = v
+    return clean, counts

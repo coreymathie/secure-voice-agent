@@ -7,16 +7,19 @@ produces an unusual burst of state-changing requests ("book 5 meetings
 in 90 seconds", "charge 3 cards in a row"), that's a strong fraud or
 confused-agent signal. We throttle and escalate rather than execute.
 
-Rules are declarative — see `DEFAULT_RULES`. Keyed on `(caller_id, tool)`
-with sliding windows in memory. For multi-instance deploys, swap the store
-for Redis (same shape of API).
+Rules are declarative — see `DEFAULT_RULES` (and config/policy.yaml, which
+production loads). Keyed on `(caller_id, tool)` with sliding windows. This
+store keeps them in process memory; for more than one voice-process instance
+use RedisVelocityStore (velocity_redis.py, same interface), selected with
+VELOCITY_BACKEND=redis by velocity_store_from_env().
 """
 
 from __future__ import annotations
 
+import os
 import time
 from collections import defaultdict, deque
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
 
@@ -34,6 +37,11 @@ DEFAULT_RULES: tuple[VelocityRule, ...] = (
     VelocityRule(tool="book_meeting", max_count=3, window_seconds=180),
     VelocityRule(tool="create_ticket", max_count=5, window_seconds=600),
     VelocityRule(tool="log_lead", max_count=5, window_seconds=600),
+    # Step-up verification: codes cost money and can be abused for SMS pumping; guesses are capped across calls.
+    VelocityRule(tool="send_verification_code", max_count=3, window_seconds=600),
+    VelocityRule(tool="verify_caller", max_count=6, window_seconds=3600),
+    # A second contact change from the same number within a day goes to a person.
+    VelocityRule(tool="update_contact", max_count=1, window_seconds=86400, action="require_human"),
 )
 
 
@@ -101,3 +109,35 @@ class VelocityStore:
             return
         for key in [k for k in self._events if k[0] == caller_id]:
             del self._events[key]
+
+
+VELOCITY_BACKENDS = ("memory", "redis")
+
+
+class VelocityConfigError(Exception):
+    """VELOCITY_BACKEND names something unusable (unknown backend, redis without REDIS_URL or the package)."""
+
+
+def velocity_store_from_env(rules: tuple[VelocityRule, ...] = DEFAULT_RULES, env: Mapping[str, str] | None = None):
+    """
+    VELOCITY_BACKEND=memory (default): this process only.
+    VELOCITY_BACKEND=redis: shared by every instance (REDIS_URL, optional VELOCITY_REDIS_PREFIX).
+    A misconfigured backend raises at startup rather than silently falling back to memory.
+    """
+    env = os.environ if env is None else env
+    backend = (env.get("VELOCITY_BACKEND") or "memory").strip().lower()
+    if backend == "memory":
+        return VelocityStore(rules=rules)
+    if backend != "redis":
+        raise VelocityConfigError(f"VELOCITY_BACKEND must be one of {VELOCITY_BACKENDS}, not {backend!r}")
+    url = (env.get("REDIS_URL") or "").strip()
+    if not url:
+        raise VelocityConfigError("VELOCITY_BACKEND=redis needs REDIS_URL")
+    try:
+        import redis
+    except ImportError as e:
+        raise VelocityConfigError("VELOCITY_BACKEND=redis needs the redis package (pip install redis)") from e
+    from .velocity_redis import RedisVelocityStore
+
+    client = redis.Redis.from_url(url, socket_timeout=0.5, socket_connect_timeout=0.5)
+    return RedisVelocityStore(client, rules=rules, prefix=env.get("VELOCITY_REDIS_PREFIX", "velocity"))
