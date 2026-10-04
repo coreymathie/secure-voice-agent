@@ -7,7 +7,7 @@
 
 A starter for a **voice AI agent that answers a real phone number** and takes action before it hangs up: booking a meeting, texting a payment link, opening a support ticket, or saving a lead.
 
-What makes it different from most voice-agent demos is the part that runs between the LLM and your business systems. Every tool call passes through **velocity checks, PII scrubbing, a hash-chained audit log, and idempotency**. Those are the patterns I worked with in fraud and dispute operations at Capital One and Fundbox, applied to an AI agent that can move money and touch customer data.
+What makes it different from most voice-agent demos is the part that runs between the LLM and your business systems. Every tool call passes through **velocity checks, PII scrubbing, a hash-chained audit log, and idempotency**. Those are the patterns I worked with in fintech fraud and dispute operations, applied to an AI agent that can move money and touch customer data.
 
 Two more things a production team asks for before an agent answers real calls:
 
