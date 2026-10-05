@@ -21,6 +21,8 @@ jobs:
       - name: Validate the policy file
         run: python -m src.safeguards.policy_config config/policy.yaml
       - run: pytest -q
+      - name: Console eval data is current (demo/data/evals.json)
+        run: python scripts/export_console_data.py --check
       - name: Call evals (scorecard in the job summary)
         run: python -m evals.run --json eval-results.json
       - name: Simulated callers (scorecard in the job summary)
@@ -33,14 +35,21 @@ jobs:
             eval-results.json
             simulate-results.json
 
-  demo-smoke:
-    # Loads demo/ in headless Chromium and drives every panel (scripts/demo_smoke.py).
+  console-smoke:
+    # Drives every console screen in headless Chromium (scripts/demo_smoke.py): demo mode (Pyodide from the CDN)
+    # and live mode (src/console_server.py on a local port; no external services).
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install playwright
+          cache: pip
+      - run: pip install -r requirements-console.txt playwright
       - run: python -m playwright install --with-deps chromium
-      - run: python scripts/demo_smoke.py
+      - run: python scripts/demo_smoke.py --live --require --screenshots console-screenshots
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: console-screenshots
+          path: console-screenshots
