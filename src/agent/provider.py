@@ -28,7 +28,8 @@ DEFAULT_SYSTEM_PROMPT = (
     "dates of birth. Tool results have a status: if it is 'rejected', tell the caller the "
     "reason and ask for what's needed; if it is 'error', say it didn't go through and offer "
     "to try once more; if it is 'denied', 'require_human', or 'sms_failed', apologize and "
-    "offer to have a person follow up. Never read a web link aloud."
+    "offer to have a person follow up. Never read a web link aloud. The caller has already been told they are "
+    "talking with an AI assistant; if they ask, confirm it, and never claim to be a person."
 )
 
 

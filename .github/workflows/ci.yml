@@ -16,13 +16,31 @@ jobs:
           python-version: "3.12"
           cache: pip
       - run: pip install -r requirements.txt
-      - run: ruff check src tests evals
-      - run: ruff format --check src tests evals
+      - run: ruff check .
+      - run: ruff format --check .
+      - name: Validate the policy file
+        run: python -m src.safeguards.policy_config config/policy.yaml
       - run: pytest -q
       - name: Call evals (scorecard in the job summary)
         run: python -m evals.run --json eval-results.json
+      - name: Simulated callers (scorecard in the job summary)
+        run: python -m evals.simulate --json simulate-results.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: eval-results
-          path: eval-results.json
+          path: |
+            eval-results.json
+            simulate-results.json
+
+  demo-smoke:
+    # Loads demo/ in headless Chromium and drives every panel (scripts/demo_smoke.py).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install playwright
+      - run: python -m playwright install --with-deps chromium
+      - run: python scripts/demo_smoke.py

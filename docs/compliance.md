@@ -4,6 +4,18 @@ The patterns here come from two places: client voice-agent work in healthcare, l
 
 The `src/safeguards/` module is the compact version of what those deployments actually need. This file explains how to use it, what it's good for, and what it isn't.
 
+## Policy gate (`policy_gate.py`)
+
+The first check on every tool call, before velocity. Its configuration is the reviewed policy file `config/policy.yaml` ([`policy.md`](policy.md)). The parts, all deterministic:
+
+- **Default-deny allow-list.** Each tool has a declared risk tier (`log_lead`, `send_verification_code`, `verify_caller` low; `create_ticket`, `book_meeting` medium; `take_payment`, `update_contact` high). A tool without one is denied, including names the model invents. `POLICY_ALLOWED_TOOLS` can switch tools off for a deployment but can't add one.
+- **Social-engineering score.** The caller's finalized turns are scored for urgency (1), authority claims (2), requests to skip checks (3), redirecting payments or contact details (3), and secrecy (2). Each signal counts once per turn and the score accumulates over the call. At `POLICY_RISK_THRESHOLD` (default 4), tools at or above `POLICY_HANDOFF_MIN_TIER` (default high) return `require_human`. One urgent sentence ("my basement is flooding") stays below the threshold.
+- **Per-call caps.** Payment links (default 4), cumulative USD across links once one has been issued (default 5,000; the first link is capped by the handler's `MAX_PAYMENT_USD`), and completed state-changing actions (default 8). Exceeding one returns `require_human`.
+
+- **Step-up verification and the takeover rule.** High-tier tools need a call verified by a one-time code sent to the phone on file; money movement after a contact change on the same call hands off. See [`auth.md`](auth.md).
+
+Decisions are audited with a reason code, the risk score, and the signal names, never the caller's words. The model gets guidance it can say ("a team member will follow up") without thresholds or flagged phrases. Mapping to frameworks: [`controls.md`](controls.md); threats and residual risk: [`threat-model.md`](threat-model.md).
+
 ## PII redaction (`pii_redactor.py`)
 
 `make_handler()` in `src/agent/tools.py` already runs `redact()` on every tool call's arguments before they reach the audit log. If you add transcript logging or any other log sink, run `redact()` on it too. The redactor returns a count-by-rule along with the scrubbed string, which is useful for two things:
@@ -44,6 +56,8 @@ Default rules:
 
 `make_handler()` calls `VelocityStore.check(caller_id, tool, request_id)` before every tool runs. On deny, the agent gets a polite refusal and the audit log gets a `velocity_denied` entry. On `require_human`, the agent is told to offer a callback and the log gets `handoff_required`.
 
+Where the counts live: in process memory by default. With several voice-process instances, set `VELOCITY_BACKEND=redis` (`REDIS_URL`) so the windows are shared; the Redis store keys callers by salted hash, so no phone numbers are stored there, and it denies requests if Redis is unreachable.
+
 What counts: every distinct request, including denied ones, so a caller who keeps pushing stays blocked. A replay of the same tool-call id counts once. A request that had no effect (rejected by validation, or failed because a provider was down) is released, so a caller who corrects an amount or retries after an outage isn't treated as abusive.
 
 ## Caller pseudonymization
@@ -56,13 +70,29 @@ The agent never takes card numbers by voice. `take_payment` creates a Stripe Pay
 
 The destination number is not the model's to choose. `make_handler()` discards any `customer_phone` argument and uses the number Twilio reported for the call, so a caller can't talk the agent into texting a payment link to a third party. If the text fails after the link is created, the handler reports `sms_failed` instead of raising, so a retry can't create a second link.
 
+## AI disclosure and recording consent
+
+Every call opens with a fixed disclosure that the caller is talking to an AI, played by Twilio from the webhook's TwiML before the agent connects (`src/handlers/call_start.py`). It doesn't depend on the model, and the system prompt also tells the agent never to claim to be a person. Set the wording with `AI_DISCLOSURE_TEXT`.
+
+This repo never records calls unless `RECORDING_ENABLED=true`. When recording is on:
+
+| `RECORDING_CONSENT_MODE` | Behavior |
+|---|---|
+| `always` (default) | Every caller hears "press 1 to allow recording, or 2 to continue without". Only 1 is consent; another key or silence means no recording. |
+| `by_jurisdiction` | Callers whose number is in an all-party state (`RECORDING_ALL_PARTY_STATES`; unknown counts as all-party), or everyone if `BUSINESS_JURISDICTION` is all-party, get the prompt. Others hear "This call may be recorded." and are recorded. |
+| `off` | No recording. |
+
+The consent result travels to the voice process as a stream parameter. There, `src/agent/disclosure.py` re-derives the rule from its own configuration (it doesn't trust the parameter alone), starts a Twilio recording only if allowed, and writes one `call_disclosure` audit entry: disclosure given or missing, consent result, jurisdiction, and whether recording started, was refused, was disabled, or failed. Set the `RECORDING_*` variables to the same values on the webhook Lambdas and the voice process; a mismatch errs toward not recording.
+
+Limits: the jurisdiction is Twilio's `FromState`, derived from the caller's number rather than their location. The default all-party list is the commonly cited one and is conservative (it includes states where the rule is disputed or differs by call type); it is not legal advice. Recording consent is collected by keypad only. Evidence: evals `ai-disclosure-always`, `consent-declined-no-recording`, `consent-no-input-no-recording`, `consent-granted-recording`, `one-party-state-notice`; `tests/test_call_start.py`.
+
 ## Post-call summaries
 
 Summaries are written by a third-party model, so the transcript is passed through `redact()` first (card numbers, SSNs, emails, phone numbers, and the rest are gone before it leaves). The `call_summary` Lambda scrubs card numbers and SSNs again before writing the CRM note. The audit log's `call_summary` entry carries the redacted summary and the salted caller reference, not the number. Set `CALL_SUMMARY_ENABLED=false` for deployments where no call content may leave the voice process, or `SUMMARY_PROVIDER=none` to keep only the rule-based summary built from tool outcomes.
 
 ## Evidence that the controls work
 
-`python -m evals.run` replays 13 call scenarios through the real safeguard layer and handlers and checks the results: limits enforced, no identifiers reaching outside services, no internal error details shown to the model, the audit chain intact. CI runs them on every push and publishes the scorecard. For an audit, the scorecard plus `evals/scenarios.yaml` documents which risks are tested and how.
+`python -m evals.run` replays the call scenarios through the real safeguard layer and handlers and checks the results: limits enforced, no identifiers reaching outside services, no internal error details shown to the model, the audit chain intact. CI runs them on every push and publishes the scorecard. For an audit, the scorecard plus `evals/scenarios.yaml` documents which risks are tested and how.
 
 ## Deployment checklist
 
@@ -72,7 +102,9 @@ Minimum viable regulated deployment:
 - [ ] `AUDIT_SALT` set to a long random value and stored in Secrets Manager
 - [ ] `TWILIO_AUTH_TOKEN` set everywhere so webhook signatures are verified
 - [ ] Audit log forwarded to a WORM-backed store with ≥7-year retention
-- [ ] Velocity rules reviewed with the business — defaults are a starting point
+- [ ] `config/policy.yaml` (tiers, caps, risk signals, step-up, velocity) reviewed with the business — defaults are a starting point; changes go through review and `python -m evals.run --policy` ([`policy.md`](policy.md))
+- [x] Tool API authenticated: HMAC-signed requests with a shared secret (`TOOL_API_SECRET`), verified before any work. Rotate the secret like any credential; IAM/SigV4 is the next step up.
+- [x] AI disclosure played before the agent speaks, and recording consent where required (`call_start.py`); review `AI_DISCLOSURE_TEXT`, `RECORDING_*`, and the all-party list with counsel
 - [ ] TLS terminated at the load balancer; agent process on private subnet
 - [ ] Secrets in AWS Secrets Manager / Azure Key Vault, not `.env`
 - [ ] Separate OpenAI/Anthropic organization for the regulated workload

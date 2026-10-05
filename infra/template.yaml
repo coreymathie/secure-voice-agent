@@ -17,6 +17,20 @@ Parameters:
     Type: String
     Default: America/New_York
     Description: IANA time zone for bookings when the caller gives a local time
+  RecordingEnabled:
+    Type: String
+    Default: "false"
+    AllowedValues: ["true", "false"]
+    Description: Record calls (only with consent where required). Set the same on the voice process.
+  RecordingConsentMode:
+    Type: String
+    Default: always
+    AllowedValues: [always, by_jurisdiction, "off"]
+    Description: When to ask callers for recording consent (src/handlers/call_start.py)
+  PayConnector:
+    Type: String
+    Default: Default
+    Description: Unique name of the Twilio Pay Connector used in PAYMENT_MODE=keypad (docs/pci.md)
 
 Globals:
   Function:
@@ -29,6 +43,8 @@ Globals:
       Variables:
         LOG_LEVEL: INFO
         IDEMPOTENCY_TABLE: !Ref IdempotencyTable
+        # Shared secret for HMAC-signed tool requests (src/handlers/_common.py). Also set on the voice process.
+        TOOL_API_SECRET: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TOOL_API_SECRET}}"
 
 Resources:
   IdempotencyTable:
@@ -60,10 +76,25 @@ Resources:
         Variables:
           AGENT_PUBLIC_WS_URL: !Ref AgentPublicWsUrl
           TWILIO_AUTH_TOKEN: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TWILIO_AUTH_TOKEN}}"
+          RECORDING_ENABLED: !Ref RecordingEnabled
+          RECORDING_CONSENT_MODE: !Ref RecordingConsentMode
       Events:
         Voice:
           Type: HttpApi
           Properties: { ApiId: !Ref Api, Path: /voice, Method: POST }
+
+  TwilioConsent:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: twilio_consent.handler
+      Environment:
+        Variables:
+          AGENT_PUBLIC_WS_URL: !Ref AgentPublicWsUrl
+          TWILIO_AUTH_TOKEN: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TWILIO_AUTH_TOKEN}}"
+      Events:
+        Consent:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /consent, Method: POST }
 
   BookMeeting:
     Type: AWS::Serverless::Function
@@ -128,6 +159,52 @@ Resources:
         Lead:
           Type: HttpApi
           Properties: { ApiId: !Ref Api, Path: /log_lead, Method: POST }
+
+  # PAYMENT_MODE=keypad (docs/pci.md): redirect the live call to Twilio <Pay>, then take the result back.
+  KeypadPayment:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: keypad_payment.handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+      Environment:
+        Variables:
+          TWILIO_ACCOUNT_SID: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TWILIO_ACCOUNT_SID}}"
+          TWILIO_AUTH_TOKEN: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TWILIO_AUTH_TOKEN}}"
+          PAY_CONNECTOR: !Ref PayConnector
+          PAY_ACTION_URL: !Sub "https://${Api}.execute-api.${AWS::Region}.amazonaws.com/prod/pay_result"
+      Events:
+        Keypad:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /keypad_payment, Method: POST }
+
+  TwilioPayResult:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: twilio_pay_result.handler
+      Environment:
+        Variables:
+          AGENT_PUBLIC_WS_URL: !Ref AgentPublicWsUrl
+          TWILIO_ACCOUNT_SID: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TWILIO_ACCOUNT_SID}}"
+          TWILIO_AUTH_TOKEN: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:TWILIO_AUTH_TOKEN}}"
+      Events:
+        PayResult:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /pay_result, Method: POST }
+
+  UpdateContact:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: update_contact.handler
+      Policies:
+        - DynamoDBCrudPolicy: { TableName: !Ref IdempotencyTable }
+      Environment:
+        Variables:
+          GOHIGHLEVEL_API_KEY: !Sub "{{resolve:secretsmanager:${SecretName}:SecretString:GOHIGHLEVEL_API_KEY}}"
+      Events:
+        Contact:
+          Type: HttpApi
+          Properties: { ApiId: !Ref Api, Path: /update_contact, Method: POST }
 
   CallSummary:
     Type: AWS::Serverless::Function

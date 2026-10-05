@@ -12,6 +12,7 @@ card data with Stripe.
 from __future__ import annotations
 
 import logging
+import math
 import os
 
 try:  # package import (tests, local dev)
@@ -33,6 +34,22 @@ def _send_sms(to: str, text: str) -> bool:
     return True
 
 
+def validate_amount(body: dict, limit: float | None = None) -> tuple[float | None, str | None]:
+    """(amount, None) or (None, message for the caller). Shared with the keypad payment handler."""
+    limit = MAX_AMOUNT_USD if limit is None else limit
+    try:
+        amount = float(body["amount_usd"])
+    except (KeyError, TypeError, ValueError):
+        return None, "amount_usd must be a number"
+    if not math.isfinite(amount):  # float("nan") and float("inf") parse, and NaN slips past both comparisons
+        return None, "amount_usd must be a number"
+    if amount <= 0:
+        return None, "amount_usd must be positive"
+    if amount > limit:
+        return None, f"amount exceeds the ${limit:,.0f} limit for phone payments"
+    return amount, None
+
+
 @idempotent
 def handler(event, _context):
     body = payload_of(event)
@@ -40,14 +57,9 @@ def handler(event, _context):
         if field not in body:
             return bad(f"missing field: {field}")
 
-    try:
-        amount = float(body["amount_usd"])
-    except (TypeError, ValueError):
-        return bad("amount_usd must be a number")
-    if amount <= 0:
-        return bad("amount_usd must be positive")
-    if amount > MAX_AMOUNT_USD:
-        return bad(f"amount exceeds the ${MAX_AMOUNT_USD:,.0f} limit for phone payments")
+    amount, problem = validate_amount(body)
+    if problem:
+        return bad(problem)
 
     import stripe
 
