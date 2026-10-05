@@ -39,7 +39,7 @@ log.info("policy loaded from %s (sha256 %s)", POLICY.source, POLICY.version_ref)
 # Same for the velocity store: a misconfigured VELOCITY_BACKEND stops startup instead of falling back to memory.
 log.info("velocity store: %s", type(velocity_store()).__name__)
 
-app = FastAPI(title="voice-agent-starter")
+app = FastAPI(title="secure-voice-agent")
 PUBLIC_WS_URL = os.environ.get("AGENT_PUBLIC_WS_URL", "wss://localhost:8765/stream")
 
 
