@@ -94,9 +94,10 @@ def test_engine_imports_without_httpx():
 
 
 def test_demo_page_fetches_only_files_that_exist():
-    html = (ROOT / "demo" / "index.html").read_text()
+    # The console's adapter layer (demo/adapters.js) lists the repo files the browser loads into Pyodide.
+    html = (ROOT / "demo" / "adapters.js").read_text()
     m = re.search(r"const PY_FILES = (\[.*?\]);", html, re.S)
-    assert m, "demo/index.html should list the Python files it loads in PY_FILES"
+    assert m, "demo/adapters.js should list the Python files it loads in PY_FILES"
     files = json.loads(m.group(1))
     assert files
     for entry in files:
