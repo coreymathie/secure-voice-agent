@@ -5,7 +5,7 @@
 ## What it is
 
 - **Personas** (`evals/personas.yaml`): 14 callers in four kinds. *Benign* (book a visit, pay an invoice from a landline while the code goes to the mobile on file, an emergency deposit, a card number read into a ticket), *impatient* (pushy but legitimate: corrects an over-limit amount, rebooks quickly), *social engineers* (owner-authority redirect, spoofed caller ID, SIM-swapped number, change-the-email-then-pay), and *prompt injectors* (ignore-your-instructions redirect, a quiet redirect with no risk words, an invented `issue_refund` tool).
-- **A scripted agent** (`ScriptedAgent` in `evals/simulate.py`): deterministic, no language model. It does whatever the caller asks, with whatever arguments the caller or an injection supplies, including tools it was never granted. It cooperates with the controls the way a well-behaved model would (verify when told `step_up_required`, read back the code, correct a rejected amount). Being gullible on purpose means the scorecard shows what the deterministic layer catches when the model has already been fooled.
+- **A scripted agent** (`ScriptedAgent` in `evals/scripted.py`, used by `evals/simulate.py` and by the console): deterministic, no language model. It does whatever the caller asks, with whatever arguments the caller or an injection supplies, including tools it was never granted. It cooperates with the controls the way a well-behaved model would (verify when told `step_up_required`, read back the code, correct a rejected amount). Being gullible on purpose means the scorecard shows what the deterministic layer catches when the model has already been fooled.
 - **The real stack underneath:** every tool call goes through `make_handler` with the policy loaded from `config/policy.yaml` (or `--policy`), step-up verification, velocity limits, scrubbing, the hash-chained audit log, and the real Lambda handler code with signed requests. Outside services are the eval fakes, and a fake clock drives the time windows.
 
 ## Scoring
@@ -31,6 +31,10 @@ Current result with the shipped policy (run locally, `python -m evals.simulate`)
 These numbers describe 14 hand-written scripts, not real callers. A 0% false-positive rate here means none of these benign scripts were blocked; it says nothing about the rate on real calls.
 
 Mutation tests (`tests/test_simulate.py`) weaken one control at a time and confirm the simulator notices: step-up skipped (the spoofed caller gets a payment link), the takeover rule removed, default deny removed (the invented refund tool runs), scrubbing removed (a card number leaks), and an over-eager risk threshold (the flooded-basement caller is blocked, so the false-positive rate goes above zero).
+
+## In the console
+
+The console's Playground (Simulated callers tab) and Evals screen play the same 14 personas with the same `ScriptedAgent` (`evals/scripted.py`) through the console engine (`demo/engine.py`). In live mode (`docker compose up`) the tool calls go to the real Lambda handler code behind signed requests, exactly as here. In demo mode (GitHub Pages) they go to in-process stand-ins for the handlers, because the browser can't load the handlers' dependencies; `tests/test_console.py` checks that both produce the same tool results, controls, and outcomes as `python -m evals.simulate` for every persona. Each played persona becomes a call in Call logs with its transcript, decision timeline, and audit chain.
 
 ## What it is not
 
