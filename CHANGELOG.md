@@ -5,6 +5,35 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] — 2026-10
+
+The single-page safeguard simulator becomes a product console, and the repo is renamed. 410 tests (up from 380), 31 call evals, 22 mutation tests, 14 simulated callers, and a 91-check browser smoke test across both console modes.
+
+**Renamed:** `voice-agent-starter` → `secure-voice-agent` (README, badges, GitHub Pages URL `https://coreymathie.github.io/secure-voice-agent/demo/`, clone instructions, `pyproject.toml` name, the SAM template description, FastAPI titles). Python packages and import paths are unchanged; the `demo/` URL still works.
+
+### Console
+
+Added
+- **The console** (`demo/`): a left-sidebar app with hash routing (`#/overview`, `#/playground`, `#/calls/<id>`, ...), deep links, and browser back. Screens: **Overview** (session totals from the calls' audit logs, measured eval pass rates, charts of decisions by tool and controls that fired, "what to try" cards), **Playground** (a test call with disclosure and consent first, a scripted agent that turns typed caller turns into tool calls, editable proposals, step-up on a simulated phone, keypad `<Pay>` TwiML preview; the 12 guided scenarios; the 14 simulated callers), **Call logs** (search and filters; a drawer with the transcript, each tool call's decision timeline, and audit verify / tamper / undo), **Policies** (edit `config/policy.yaml`, validate with the real loader, apply, re-run a call under the shipped and the applied policy side by side, inline errors, a diff against the shipped file), **Evals** (call evals, mutation tests, simulated callers, pytest totals), **Settings** (voice providers and the environment variables they read, tool endpoints, request signing). A five-step guided tour on the first visit. Split into `index.html`, `app.js`, `adapters.js`, `charts.js` (inline SVG, no chart library), and `styles.css`.
+- **Two modes, one codebase.** `DemoAdapter` runs the repo's Python in Pyodide 0.26.4 (now including `policy_config.py` with PyYAML and pydantic from the Pyodide distribution, and `provider.py`); `LiveAdapter` calls the console server. The mode comes from `./api-mode` and shows as a header badge ("Demo · runs in your browser" / "Live · connected to <host>").
+- **Console server** (`src/console_server.py`, `python -m src.console_server`): FastAPI app serving `demo/` at `/console` with a JSON API (listings, call actions, scenarios, simulated callers, policy validate / apply / reset / compare, evals re-run, signing self-test). Every tool call goes to the real Lambda handler code as an HMAC-signed request that the handler verifies; the signing secret is generated at startup (or `TOOL_API_SECRET`), never returned or logged. Outside services are the eval fakes. Optional `CONSOLE_TOKEN` for `/api/*`; binds to 127.0.0.1 by default.
+- `docker-compose.yml` + `Dockerfile.console` + `requirements-console.txt`: `docker compose up` → http://localhost:8090/console/ with no API keys.
+- **Console engine** (`demo/engine.py` `Console`): call records, the playground's scripted agent (`PlaygroundAgent`, keyword rules, gullible on purpose), persona runs, policy editing through `policy_config.parse_policy`, overview aggregates, settings read from the code. `console_api()` is the browser bridge; `dispatch()` whitelists the callable methods.
+- `scripts/export_console_data.py` writes `demo/data/evals.json` from the repo's own eval scripts and test run (call evals, simulated callers with transcripts, mutation tests, pytest totals). `--check` fails if the committed results are stale; CI runs it.
+- `scripts/demo_smoke.py` rewritten: visits every screen in demo mode and does its key interaction, checks the tour, browser back, no page errors, no horizontal scroll at 390px and 1366px; `--live` runs Overview, Playground (signed requests), Call logs, Evals (server re-run), Settings (signing self-test), and Policies against the console server; `--screenshots DIR` saves desktop and phone screenshots. Skips cleanly without Playwright unless `--require`.
+- Tests: `tests/test_console.py` (the console's simulated callers match `python -m evals.simulate` persona by persona; playground flows through step-up, social engineering, scrubbing, default deny, keypad capture; policy validation and apply; overview counts; the JS bridge) and `tests/test_console_server.py` (endpoints, signing on every live tool call, keypad Lambda, the signing self-test, secrets never in a response, token auth, JSON errors).
+- `docs/console.md`; `docs/img/console.png`.
+
+Changed
+- `ScriptedAgent`, persona parsing, goal checks, the controls-fired summary, and the simulator metrics moved from `evals/simulate.py` to `evals/scripted.py` (no harness imports, so the console can run them in the browser); `simulate.py` re-exports them and behaves the same.
+- `evals/harness.py`: the service patches are factored into `patch_services()` so the console server can reuse them with its own signing secret.
+- `DemoEngine` takes a loaded policy (tiers, caps, signals, velocity rules, step-up settings from the policy file), a backends object, a customer record, risk signals, a code factory, and a well-formed call SID. `SimulatedBackends` records what each outside service would have received (same names as the eval fakes) and, in keypad mode, pauses the recording only if one is running, as `keypad_payment.py` does; the "Pay by keypad" scenario now starts with a recorded call so the pause is visible.
+- CI: the `demo-smoke` job is now `console-smoke` and runs both modes, uploading screenshots; the test job checks `demo/data/evals.json` is current.
+- `tests/test_demo_engine.py` reads the browser's file list from `demo/adapters.js` (it moved out of `index.html`).
+- `.dockerignore` no longer excludes `evals/` (the console image needs the harness; the voice image still copies only `src/` and `config/`).
+
+Not changed: nothing here places or answers phone calls or uses a language model. Every number on the console is either counted from this session's simulated calls or measured by the repo's eval scripts, and labelled as such.
+
 ## [0.6.0] — 2026-10
 
 Phase 2, built in checkpoints; each one passed lint, format, tests, evals, and the browser-demo smoke check before it was committed. 370 tests (up from 144; 10 more run when fakeredis is installed), 31 call-eval scenarios (up from 18), 14 simulated callers.

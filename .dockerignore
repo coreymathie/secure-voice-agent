@@ -4,7 +4,6 @@
 logs
 secrets
 tests
-evals
 .git
 .github
 **/__pycache__
