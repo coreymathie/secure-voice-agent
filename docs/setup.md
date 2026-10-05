@@ -16,8 +16,8 @@ Payments and contact changes need step-up verification ([`auth.md`](auth.md)). T
 ## 2. Install
 
 ```bash
-git clone https://github.com/coreymathie/voice-agent-starter.git
-cd voice-agent-starter
+git clone https://github.com/coreymathie/secure-voice-agent.git
+cd secure-voice-agent
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
