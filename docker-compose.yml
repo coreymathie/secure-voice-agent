@@ -1,0 +1,18 @@
+# Corey Mathie, 2026
+# Live mode for the Secure Voice Agent console:
+#   docker compose up      ->  http://localhost:8090/console/
+# No API keys needed. Phone calls are a different deployment (Twilio + src/agent/server.py + Lambda; docs/deploy.md).
+name: secure-voice-agent
+services:
+  console:
+    build:
+      context: .
+      dockerfile: Dockerfile.console
+    image: secure-voice-agent-console
+    ports:
+      - "127.0.0.1:8090:8090"   # localhost only; set CONSOLE_TOKEN before exposing it anywhere else
+    environment:
+      CONSOLE_TOKEN: ${CONSOLE_TOKEN:-}         # optional: require this token on /api/* (enter it in Settings)
+      TOOL_API_SECRET: ${TOOL_API_SECRET:-}     # optional: empty means a random secret is generated at startup
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+    restart: unless-stopped

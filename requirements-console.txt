@@ -1,0 +1,9 @@
+# Console server (src/console_server.py, `docker compose up`): live mode needs no paid API keys.
+# The real Lambda handler code runs in-process; outside services are the eval fakes.
+fastapi>=0.110.0
+uvicorn>=0.29.0
+pydantic>=2.6                # policy file schema (config/policy.yaml)
+pyyaml>=6.0                  # policy file, eval scenarios, personas
+httpx>=0.27.0                # imported by the tool layer and the CRM handlers (never called: faked)
+twilio>=9.0.0                # request validation in the voice/consent webhook handlers
+zenpy>=2.0.46                # the create_ticket handler builds Zendesk Ticket objects (the client is faked)
