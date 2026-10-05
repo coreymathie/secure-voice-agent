@@ -1,7 +1,7 @@
 [project]
-name = "voice-agent-starter"
-version = "0.6.0"
-description = "Reference architecture for a phone AI agent that can move money: deterministic policy gate, step-up verification, policy as code, velocity limits, PII scrubbing, PCI keypad capture, AI disclosure and consent, hash-chained audit, evals, simulated callers, and tracing. Pipecat + Twilio + AWS Lambda"
+name = "secure-voice-agent"
+version = "0.7.0"
+description = "Secure Voice Agent: reference architecture and console for a phone AI agent that can move money: deterministic policy gate, step-up verification, policy as code, velocity limits, PII scrubbing, PCI keypad capture, AI disclosure and consent, hash-chained audit, evals, simulated callers, tracing, and a product console (browser demo or local live server). Pipecat + Twilio + AWS Lambda"
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }

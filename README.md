@@ -1,15 +1,30 @@
-# voice-agent-starter
+# Secure Voice Agent
 
-[![ci](https://github.com/coreymathie/voice-agent-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/coreymathie/voice-agent-starter/actions/workflows/ci.yml)
+[![ci](https://github.com/coreymathie/secure-voice-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/coreymathie/secure-voice-agent/actions/workflows/ci.yml)
 ![python](https://img.shields.io/badge/python-3.11%2B-blue)
 ![pipecat](https://img.shields.io/badge/pipecat-1.x-purple)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-**A reference architecture for a phone AI agent that can take payments and write to business systems, with deterministic controls between the model and every action it takes.**
+**A phone AI agent that can take payments and write to business systems, with deterministic controls between the model and every action it takes, and a console to test, inspect, and tune them.**
 
-### ▶ [Try the safeguard simulator in your browser](https://coreymathie.github.io/voice-agent-starter/demo/)
+### ▶ [Open the live console](https://coreymathie.github.io/secure-voice-agent/demo/)
 
-Play the caller and the model: start a call and answer the recording-consent prompt, type what the caller says, fire tool calls, verify the caller with a one-time code on a simulated phone, switch to keypad payments and see the Twilio `<Pay>` TwiML, advance the clock, then tamper with the audit log and watch verification catch it. It runs this repo's real `make_handler()` and `src/safeguards/` code in your browser via Pyodide. No backend, no LLM, no network calls after load.
+[![The Secure Voice Agent console: session totals, decisions by tool, and controls that fired](docs/img/console.png)](https://coreymathie.github.io/secure-voice-agent/demo/)
+
+The console runs this repo's real `make_handler()`, `src/safeguards/`, and `config/policy.yaml` loader in your browser through Pyodide. Talk to the agent as a caller, watch each tool call pass or stop at the policy gate, step-up verification, velocity limits, and PII scrubbing, read the decision timeline of every call, tamper with its audit log, edit the policy and re-run, and check the measured evals. No backend, no LLM, no network calls after load; outside services are simulated and labelled as such.
+
+## Console
+
+| Screen | What it shows |
+|---|---|
+| **Overview** | Calls, tool calls allowed / blocked / stepped up / handed off, payments by link vs keypad, intact audit chains, measured eval pass rates; charts of decisions by tool and controls that fired |
+| **Playground** | A test call: AI disclosure and recording consent first, then typed caller turns that a scripted agent turns into tool calls through the real safeguards; step-up codes on a simulated phone; keypad `<Pay>` TwiML preview; 12 guided scenarios; the 14 simulated callers from `evals/personas.yaml` |
+| **Call logs** | Every call with search and filters; a drawer with the transcript, each tool call's decision timeline, and the hash-chained audit log (verify, tamper, undo) |
+| **Policies** | Edit `config/policy.yaml`, validate it with the repo's own loader, apply it, and re-run a call under the shipped and the edited policy side by side |
+| **Evals** | 31 call evals, 22 mutation tests, and the simulated-caller scorecard, exported from the repo's own scripts |
+| **Settings** | Voice providers (OpenAI Realtime, Claude cascade, Gemini Live) as configuration, tool endpoints, request-signing status and self-test; secrets are never displayed |
+
+**Run it live:** `docker compose up` → http://localhost:8090/console/ (or `pip install -r requirements-console.txt && python -m src.console_server`). The same console then talks to a local server that runs the real Lambda handler code behind HMAC-signed requests, with a signing secret generated at startup and the eval fakes standing in for Stripe, Twilio, Google Calendar, Zendesk, and the CRM. No API keys needed. It still makes no phone calls: real calls need a Twilio number and the deployment below. Details, endpoints, and what is simulated in each mode: [`docs/console.md`](docs/console.md).
 
 ---
 
@@ -119,7 +134,7 @@ Tool-call controls run in `make_handler()` (`src/agent/tools.py`) on every tool 
 ## Quality
 
 ```bash
-ruff check . && ruff format --check . && pytest -q   # 380 tests (10 are skipped if fakeredis is not installed)
+ruff check . && ruff format --check . && pytest -q   # 410 tests (10 are skipped if fakeredis is not installed)
 python -m src.safeguards.policy_config config/policy.yaml   # validate the policy file
 python -m evals.simulate                              # 14 scripted callers, multi-turn
 python -m evals.run                                   # 31/31 scenarios
@@ -127,10 +142,10 @@ python -m evals.run                                   # 31/31 scenarios
 
 - **31 call-eval scenarios** ([`evals/scenarios.yaml`](evals/scenarios.yaml)): 13 from 0.4.0 (payment bursts, slow-drip payments, replayed requests, provider outages, a card number read into a ticket, a prompt-injected redirect of a payment link, and more), 5 for the policy gate (social-engineering handoff, a benign urgent caller who must *not* be blocked, the per-call USD ceiling, a backend tool the agent was never granted, the per-call action ceiling), and 5 for step-up verification (spoofed caller ID, verify-then-pay, code guessing and lockout, a SIM-swap signal, change-the-email-then-pay), 3 for keypad payments (recording paused before capture, capture refused when it can't be paused, amount limit in keypad mode), and 5 for call start (the AI disclosure comes first; declined, silent, and granted recording consent; a one-party-state notice). Call-start scenarios run the real webhook Lambdas with Twilio-signed requests.
 - The harness runs each scenario through the real stack: `make_handler`, the policy gate, velocity limits, scrubbing, the audit log, and the actual Lambda handler code with its idempotency layer. Only Stripe, Twilio SMS and Verify, Google Calendar, Zendesk, and the CRM are faked, and the fakes enforce the real services' rules where it matters. Step-up runs the real `StepUpSession` against an in-memory CRM record and a simulated verifier. A fake clock drives the time windows.
-- **380 pytest tests**, including **22 mutation tests**: 17 switch off one control at a time and confirm the evals fail (scrubbing, velocity, retry release, idempotency, the policy gate, risk scoring, per-call counters, an over-eager risk threshold, step-up, codes sent to caller ID, the lockout, the takeover rule, the SIM-swap hook, card capture without pausing the recording, recording without consent, silence treated as consent, and a missing AI disclosure), and 5 do the same for the simulator.
+- **410 pytest tests**, including **22 mutation tests**: 17 switch off one control at a time and confirm the evals fail (scrubbing, velocity, retry release, idempotency, the policy gate, risk scoring, per-call counters, an over-eager risk threshold, step-up, codes sent to caller ID, the lockout, the takeover rule, the SIM-swap hook, card capture without pausing the recording, recording without consent, silence treated as consent, and a missing AI disclosure), and 5 do the same for the simulator.
 - **Simulated callers** ([`docs/simulation.md`](docs/simulation.md)): 14 scripted multi-turn personas (benign, impatient, social engineers, prompt injectors) against the real stack with a deliberately gullible scripted agent (no LLM). Scored on task success, correct refusals, false-positive rate, and handoffs. Current run: 7/7 benign and impatient callers got what they came for, 7/7 adversarial callers were stopped, 0 benign callers blocked. That is 14 hand-written scripts, text-level only (no audio, no model); it is not a measured rate on real calls.
 - Mutation tests that weaken the *policy* do it the way a reviewer would: an edited copy of `config/policy.yaml` (lockout raised to 99 attempts, risk threshold lowered to 1) run through the evals, as `python -m evals.run --policy` does.
-- CI runs lint, format check, the policy validator, tests, evals, and the simulator on every push and publishes the scorecard to the job summary.
+- CI runs lint, format check, the policy validator, tests, evals, and the simulator on every push and publishes the scorecard to the job summary. It also fails if the console's committed eval results (`demo/data/evals.json`) are stale, and drives every console screen in headless Chromium in both modes (`scripts/demo_smoke.py --live`).
 
 ```
 **31/31 scenarios passed**
@@ -187,8 +202,8 @@ Set `OTEL_EXPORTER_OTLP_ENDPOINT` and Pipecat's OpenTelemetry tracing turns on: 
 ## Quickstart (local)
 
 ```bash
-git clone https://github.com/coreymathie/voice-agent-starter.git
-cd voice-agent-starter
+git clone https://github.com/coreymathie/secure-voice-agent.git
+cd secure-voice-agent
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env              # add OPENAI_API_KEY and your Twilio credentials
@@ -201,7 +216,7 @@ Set `AGENT_PUBLIC_WS_URL=wss://<your-ngrok-host>/stream` in `.env` and restart. 
 
 Payments and contact changes need step-up verification configured (a CRM lookup and Twilio Verify; see [`docs/setup.md`](docs/setup.md)); without it they hand off to a person.
 
-Run the browser demo locally: `python -m http.server 8000` from the repo root, then open http://localhost:8000/demo/. `python scripts/demo_smoke.py` loads it in headless Chromium (Playwright) and drives every panel.
+Run the console locally: `python -m http.server 8000` from the repo root and open http://localhost:8000/demo/ (demo mode), or `docker compose up` and open http://localhost:8090/console/ (live mode). `python scripts/demo_smoke.py --live` drives every screen in both modes in headless Chromium (Playwright).
 
 Full walkthrough: [`docs/setup.md`](docs/setup.md). Deploying to AWS and Fly.io: [`docs/deploy.md`](docs/deploy.md).
 
@@ -233,14 +248,17 @@ src/
                 velocity_redis.py (shared store), pii_redactor.py, audit_log.py, telemetry.py
   handlers/     Lambda functions + shared idempotency helpers; call_start.py (disclosure/consent TwiML),
                 pay_twiml.py (Twilio <Pay> TwiML)
-evals/          scenarios.yaml, harness.py, run.py (call evals), personas.yaml + simulate.py (simulated callers),
+  console_server.py  live-mode console: FastAPI app serving demo/ at /console plus its JSON API
+evals/          scenarios.yaml, harness.py, run.py (call evals), personas.yaml + simulate.py + scripted.py (simulated callers),
                 latency.py (p50/p95 from traces)
-demo/           index.html + engine.py: the in-browser safeguard simulator (GitHub Pages)
-scripts/        demo_smoke.py: headless-browser check of the demo
+demo/           the console: index.html, app.js, adapters.js (Pyodide or live API), charts.js, styles.css,
+                engine.py (the console engine, run in the browser or by the server), data/evals.json
+scripts/        demo_smoke.py (headless-browser check, both modes), export_console_data.py (demo/data/evals.json)
 config/         policy.yaml: the reviewed policy (tiers, caps, risk signals, step-up, velocity)
 infra/          AWS SAM template
 Dockerfile, fly.toml  voice-process image and Fly.io config
-docs/           architecture, adr/, auth, pci, policy, simulation, threat-model, controls, observability, compliance, setup, deploy
+Dockerfile.console, docker-compose.yml  console server (live mode)
+docs/           architecture, adr/, auth, console, pci, policy, simulation, threat-model, controls, observability, compliance, setup, deploy
 tests/          pytest suite
 ```
 
