@@ -606,6 +606,24 @@ def _check(scenario: dict, up: Upstreams, audit: AuditLog, llm_saw: list) -> lis
     return failures
 
 
+def patch_services(stack: ExitStack, up: Upstreams, table: MemoryTable | None = None, env: dict | None = None) -> None:
+    """
+    Patch every outside service with the fakes in `up` and give the Lambda handlers an
+    in-memory idempotency table, for as long as `stack` is open. `env` is laid over
+    FAKE_ENV (the console server passes its own TOOL_API_SECRET here).
+    """
+    stack.enter_context(patch.dict(os.environ, {**FAKE_ENV, **(env or {})}))
+    stack.enter_context(patch.dict(sys.modules, {"stripe": up.stripe_module()}))
+    stack.enter_context(patch.object(_common, "_TABLE", table if table is not None else MemoryTable()))
+    stack.enter_context(patch.object(take_payment, "_send_sms", up.send_sms))
+    stack.enter_context(patch.object(book_meeting, "_service", up.calendar))
+    stack.enter_context(patch.object(create_ticket, "_client", up.zendesk))
+    stack.enter_context(patch.object(log_lead, "httpx", up.crm_httpx()))
+    stack.enter_context(patch.object(update_contact, "httpx", up.crm_httpx()))
+    stack.enter_context(patch.object(keypad_payment, "_twilio", up.twilio_client))
+    stack.enter_context(patch.object(RefundBackend, "upstreams", up))
+
+
 @contextmanager
 def fake_world(up: Upstreams):
     """
@@ -614,16 +632,7 @@ def fake_world(up: Upstreams):
     here and by the simulated-caller harness (evals/simulate.py).
     """
     with tempfile.TemporaryDirectory() as tmp, ExitStack() as stack:
-        stack.enter_context(patch.dict(os.environ, FAKE_ENV))
-        stack.enter_context(patch.dict(sys.modules, {"stripe": up.stripe_module()}))
-        stack.enter_context(patch.object(_common, "_TABLE", MemoryTable()))
-        stack.enter_context(patch.object(take_payment, "_send_sms", up.send_sms))
-        stack.enter_context(patch.object(book_meeting, "_service", up.calendar))
-        stack.enter_context(patch.object(create_ticket, "_client", up.zendesk))
-        stack.enter_context(patch.object(log_lead, "httpx", up.crm_httpx()))
-        stack.enter_context(patch.object(update_contact, "httpx", up.crm_httpx()))
-        stack.enter_context(patch.object(keypad_payment, "_twilio", up.twilio_client))
-        stack.enter_context(patch.object(RefundBackend, "upstreams", up))
+        patch_services(stack, up)
         yield AuditLog(Path(tmp) / "audit.jsonl")
 
 
