@@ -1,0 +1,113 @@
+# Corey Mathie, 2026
+#
+# The voice agent's policy, as code. Loaded at startup by src/safeguards/policy_config.py:
+# schema-validated (unknown keys, bad tiers, negative caps, and regexes that don't compile are
+# errors), and an invalid file stops the process from starting (fail closed).
+#
+# Review workflow:
+#   python -m src.safeguards.policy_config config/policy.yaml     # validate + print a summary and hash
+#   python -m evals.run --policy config/policy.yaml               # run every call scenario against it
+# tests/test_policy_config.py proves this file matches the code defaults in policy_gate.py,
+# velocity.py, and step_up.py; change both together, or the test fails.
+#
+# POLICY_* and STEP_UP_* environment variables still apply on top of this file (and can only
+# narrow the tool allow-list). POLICY_FILE points at a different file.
+
+version: 1
+
+# Tools the agent may call. Anything not listed is denied (default deny). enabled: false keeps the
+# declaration but takes the tool off the allow-list.
+tools:
+  log_lead:
+    tier: low
+    why: 'upserts a CRM contact; no outbound message'
+  create_ticket:
+    tier: medium
+    why: 'writes caller-supplied free text into a system staff trust'
+  book_meeting:
+    tier: medium
+    why: 'emails a calendar invitation to a caller-supplied address'
+  take_payment:
+    tier: high
+    moves_money: true
+    why: 'creates a payment link and texts it, or starts keypad card capture'
+  update_contact:
+    tier: high
+    changes_contact: true
+    why: 'changes the phone or email on file, the usual first step of an account takeover'
+  send_verification_code:
+    tier: low
+    state_changing: false
+    why: 'sends a one-time code to the contact on file only; rate-limited against SMS pumping'
+  verify_caller:
+    tier: low
+    state_changing: false
+    why: 'checks a one-time code; marks the call verified'
+
+# Per-call blast radius.
+caps:
+  max_payment_links_per_call: 4
+  max_usd_per_call: 5000
+  max_actions_per_call: 8
+
+# Social-engineering scoring of the caller's finalized turns. Each signal counts once per turn;
+# the score accumulates over the call. At `threshold`, tools at or above `handoff_min_tier` hand off.
+# Patterns are Python regular expressions, matched case-insensitively against lower-cased text.
+risk:
+  threshold: 4
+  handoff_min_tier: high
+  max_score: 20
+  signals:
+    urgency:
+      weight: 1
+      patterns:
+        - '\b(urgent(ly)?|emergency|asap|immediately|hurry|no time|right (now|away)|as fast as (you|possible))\b'
+        - '\bbefore (it''?s|it is) too late\b'
+    authority:
+      weight: 2
+      patterns:
+        - '\b(i''?m|i am|this is) (the |a |an |your )?(owner|ceo|cfo|president|manager|supervisor|director|administrator|admin|officer|detective|auditor|investigator)\b'
+        - '\b(from|with|calling from) (the )?(irs|fbi|police|sheriff''?s office|bank|fraud (department|team)|security (department|team)|it department|head office|corporate)\b'
+        - '\bon behalf of (the |my )?(owner|ceo|bank|management|boss)\b'
+        - '\b(i''?m|i am) authori[sz]ed\b'
+        - '\bmy boss (said|told|wants|needs)\b'
+    skip_checks:
+      weight: 3
+      patterns:
+        - '\b(skip|bypass|override|disable|turn off|get around) (the |your |all |any |those )?(verification|security|checks?|confirmation|rules?|limits?|polic(y|ies)|process|protocol|steps?)\b'
+        - '\b(don''?t|do not|no need to|you don''?t need to|you do not need to) (verify|confirm|check|validate)\b'
+        - '\bignore (your|the|all|any|previous|prior) (instructions|rules|polic(y|ies)|limits|guidelines|system prompt)\b'
+        - '\b(make|do) an exception\b'
+        - '\bjust this once\b'
+    redirect:
+      weight: 3
+      patterns:
+        - '\b(send|text|email|e-mail|forward)( it| the link| the payment link| that| the code| the refund)? (instead )?to (a |my |this |another |a different |the other )?(different|another|other|new|alternate|second|friend''?s|wife''?s|husband''?s|partner''?s|son''?s|daughter''?s|boss''?s|assistant''?s|colleague''?s) ?(phone |cell )?(number|phone|cell|email|e-mail|address|account)\b'
+        - '\b(send|text|email|forward) (it|the link|the payment link|that|the code) to (my|his|her|their) (friend|colleague|assistant|boss|wife|husband|partner|son|daughter)\b'
+        - '\b(change|update|switch) (my |the )?(phone number|number on file|email on file|bank account|account number|routing number|payout account|deposit account)\b'
+        - '\b(gift cards?|wire (it|the money|transfer)|bitcoin|crypto(currency)?|western union)\b'
+    secrecy:
+      weight: 2
+      patterns:
+        - '\b(don''?t|do not) (tell|mention|inform|notify|let) (anyone|anybody|my|the|your)\b'
+        - '\bkeep (this|it) (between us|quiet|secret|confidential)\b'
+
+# Step-up verification (docs/auth.md). min_tier: low | medium | high | off.
+step_up:
+  min_tier: high
+  max_failed_attempts: 3
+  max_sends_per_call: 3
+  code_ttl_seconds: 600
+  channels: [sms, call]
+  blocking_signals: [recent_contact_change, recent_number_port, recent_sim_swap]
+
+# Per-caller sliding windows (velocity.py). action: deny | require_human | flag.
+velocity:
+  - {tool: take_payment, max_count: 1, window_seconds: 120, action: deny}
+  - {tool: take_payment, max_count: 3, window_seconds: 3600, action: require_human}
+  - {tool: book_meeting, max_count: 3, window_seconds: 180, action: deny}
+  - {tool: create_ticket, max_count: 5, window_seconds: 600, action: deny}
+  - {tool: log_lead, max_count: 5, window_seconds: 600, action: deny}
+  - {tool: send_verification_code, max_count: 3, window_seconds: 600, action: deny}
+  - {tool: verify_caller, max_count: 6, window_seconds: 3600, action: deny}
+  - {tool: update_contact, max_count: 1, window_seconds: 86400, action: require_human}

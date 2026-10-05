@@ -11,6 +11,8 @@ From zero to a working voice agent on a real phone number, running locally.
 
 The tool handlers (calendar, payments, tickets, leads) are optional for a first call. Without `LAMBDA_BASE_URL` set, the agent will still talk; tool calls will return a safe "didn't go through" message, which the audit log records.
 
+Payments and contact changes need step-up verification ([`auth.md`](auth.md)). To try it locally, point `CRM_LOOKUP_FILE` at a JSON file like `[{"customer_id": "c1", "phone_on_file": "+15555550142", "lookup_numbers": ["+15555550100"]}]` and set `TWILIO_VERIFY_SERVICE_SID`. Without them, those tools hand off to a person.
+
 ## 2. Install
 
 ```bash

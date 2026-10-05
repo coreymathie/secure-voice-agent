@@ -12,6 +12,8 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 COPY src ./src
+# The reviewed policy file; the process refuses to start if it's invalid (src/safeguards/policy_config.py).
+COPY config ./config
 
 RUN useradd --create-home --uid 10001 agent && mkdir -p /app/logs && chown -R agent /app
 USER agent
