@@ -16,6 +16,8 @@ const fmtClock = (s) => {
 const when = (ts) => {
   try { return new Date(ts * 1000).toLocaleTimeString([], {hour: "2-digit", minute: "2-digit", second: "2-digit"}); } catch { return ""; }
 };
+// Escaped identifier with line-break chances after _ / : so long snake_case names and paths wrap cleanly in tables.
+const wb = (s) => esc(s).replace(/([_/:])(?=[^_/:])/g, "$1<wbr>");
 const highlight = (s) => esc(s).replace(/\[REDACTED_[A-Z_]+\]/g, (m) => `<mark>${m}</mark>`);
 const json = (o) => JSON.stringify(o, null, 2);
 const plural = (n, word, many) => `${n} ${n === 1 ? word : (many || word + "s")}`;
@@ -248,7 +250,7 @@ async function renderOverview(view) {
     ${tile("Blocked", o.counts.blocked, "denied before any backend", "sim")}
     ${tile("Stepped up", o.counts.step_up, "needed a verified caller", "sim")}
     ${tile("Handoffs", o.counts.handoff, "sent to a person", "sim")}
-    ${tile("Payments", `${o.payments.link}<small> link</small> · ${o.payments.keypad}<small> keypad</small>`, `${usd(o.payments.usd)} issued (simulated)`, "sim", true)}
+    ${tile("Payments", `<span class="nw">${o.payments.link}<small> link</small></span> · <span class="nw">${o.payments.keypad}<small> keypad</small></span>`, `${usd(o.payments.usd)} issued (simulated)`, "sim", true)}
     ${tile("Audit chains intact", `${o.chains.ok}<small> / ${o.calls}</small>`, o.chains.broken ? `${o.chains.broken} tampered` : "verify_chain() on every call", "sim", true)}
   </section>
   <section class="tiles" aria-label="Measured results">
@@ -397,18 +399,19 @@ async function renderTestCall(body) {
     <section class="card chat-card" aria-labelledby="chat-h">
       <div class="chat-head">
         <h2 id="chat-h" class="mono" style="font-size:14px">${esc(d.id)}</h2><span class="pill ok" id="call-status">on the line</span>
-        <span class="spacer"></span>
-        <span class="clock" id="clock" title="Simulated clock (drives the velocity windows)">${fmtClock(d.clock_s)}</span>
-        <button type="button" class="sm" data-adv="30">+30 s</button>
-        <button type="button" class="sm" data-adv="150">+2.5 min</button>
-        <button type="button" class="sm warn" id="end-call">End call</button>
+        <div class="chat-tools">
+          <span class="clock" id="clock" title="Simulated clock (drives the velocity windows)">${fmtClock(d.clock_s)}</span>
+          <button type="button" class="sm" data-adv="30">+30 s</button>
+          <button type="button" class="sm" data-adv="150">+2.5 min</button>
+          <button type="button" class="sm warn" id="end-call">End call</button>
+        </div>
       </div>
       <div class="chat" id="chat" aria-live="polite" aria-label="Call transcript"></div>
       <div id="pending"></div>
       <div class="composer">
         <form id="say-form"><label class="sr" for="say-text">What the caller says</label><input id="say-text" autocomplete="off" placeholder="Say something as the caller…"><button class="primary" type="submit" id="say-btn">Say</button></form>
         <div class="quick" aria-label="Example caller lines">${QUICK.map(([l, t]) => `<button type="button" data-say="${esc(t)}">${esc(l)}</button>`).join("")}</div>
-        <label class="check" style="margin:0"><input type="checkbox" id="auto-run" ${S.autoRun ? "checked" : ""}> Run the agent's tool calls automatically <span class="muted">(off: review and edit each one first)</span></label>
+        <label class="check" style="margin:0"><input type="checkbox" id="auto-run" ${S.autoRun ? "checked" : ""}> <span>Run the agent's tool calls automatically <span class="muted">(off: review and edit each one first)</span></span></label>
         <p class="hint">Scripted agent: keyword rules stand in for the model and are gullible on purpose; each caller turn advances the simulated clock 15 s.</p>
       </div>
     </section>
@@ -572,9 +575,9 @@ function paintPending(d) {
   $$("[data-skip]", box).forEach((b) => b.addEventListener("click", () => act(async () => paintCall(await call("skip_pending", {call_id: S.callId, index: Number(b.dataset.skip)})), b)));
 }
 
-function meter(label, val, max, shown) {
+function meter(label, val, max, shown, maxShown = max) {
   const pct = max ? Math.min(100, (val / max) * 100) : 0;
-  return `<div class="meter"><div class="k">${esc(label)}</div><div class="v">${shown} <small>/ ${esc(max)}</small></div><div class="bar ${val >= max ? "hot" : ""}" role="meter" aria-valuemin="0" aria-valuemax="${esc(max)}" aria-valuenow="${esc(val)}" aria-label="${esc(label)}"><i style="width:${pct}%"></i></div></div>`;
+  return `<div class="meter"><div class="k">${esc(label)}</div><div class="v">${shown} <small>/ ${esc(maxShown)}</small></div><div class="bar ${val >= max ? "hot" : ""}" role="meter" aria-valuemin="0" aria-valuemax="${esc(max)}" aria-valuenow="${esc(val)}" aria-label="${esc(label)}"><i style="width:${pct}%"></i></div></div>`;
 }
 
 function paintSide(d) {
@@ -591,7 +594,7 @@ function paintSide(d) {
     <div class="meters">
       ${meter("Caller risk score", p.risk_score, p.risk_threshold, esc(p.risk_score))}
       ${meter("Payment links", p.payment_links_issued, p.max_payment_links_per_call, esc(p.payment_links_issued))}
-      ${meter("USD issued", p.usd_issued, p.max_usd_per_call, esc(usd(p.usd_issued)))}
+      ${meter("USD issued", p.usd_issued, p.max_usd_per_call, esc(usd(p.usd_issued)), usd(p.max_usd_per_call))}
       ${meter("Actions completed", p.actions_completed, p.max_actions_per_call, esc(p.actions_completed))}
     </div>
     <p class="hint" style="margin-top:8px">${p.contact_changed ? '<span class="pill warn">contact changed this call</span> ' : ""}Policy ${esc(d.policy_ref)} · step-up at ${esc(p.step_up_min_tier)} tier · recording ${esc(d.recording || "n/a")}</p>
@@ -671,7 +674,7 @@ async function renderCallers(body) {
     <div class="table-wrap" style="margin-top:12px"><table><thead><tr><th>Persona</th><th>Kind</th><th class="hide-sm">Says</th><th>Goal</th><th>Result</th><th>Tool results</th><th class="hide-sm">Controls that fired</th><th></th></tr></thead><tbody>
     ${personas.map((p) => {
       const r = byId[p.id];
-      return `<tr ${r ? `class="click" tabindex="0" data-call="${esc(r.call_id)}"` : ""}><td class="mono">${esc(p.id)}</td><td><span class="tag">${esc(p.kind.replace("_", " "))}</span></td>
+      return `<tr ${r ? `class="click" tabindex="0" data-call="${esc(r.call_id)}"` : ""}><td class="mono wrap">${esc(p.id)}</td><td><span class="tag">${esc(p.kind.replace("_", " "))}</span></td>
         <td class="hide-sm wrap">${esc((p.turns[0] || "").slice(0, 90))}${(p.turns[0] || "").length > 90 ? "…" : ""}</td>
         <td class="wrap">${esc(goalText(p.goal))}<span class="sub">should be ${esc(p.expect)}</span></td>
         <td>${r ? `${r.correct ? '<span class="ok-mark">✓</span>' : '<span class="bad-mark">✗</span>'} ${esc(r.achieved ? "achieved" : "blocked")}` : '<span class="muted">—</span>'}</td>
@@ -733,7 +736,7 @@ async function renderCalls(view) {
         <td class="num hide-sm">${esc(c.tool_calls)}</td>
         <td>${countsBadges(c.counts)}</td>
         <td class="hide-sm">${c.controls.length ? `<span class="chips">${c.controls.slice(0, 3).map((x) => `<span class="chip neutral">${esc(controlName(x))}</span>`).join("")}${c.controls.length > 3 ? `<span class="chip none">+${c.controls.length - 3}</span>` : ""}</span>` : '<span class="muted">none</span>'}</td>
-        <td class="hide-sm">${c.chain_ok ? '<span class="pill ok">intact</span>' : '<span class="pill bad">broken</span>'}<span class="sub">${esc(c.audit_entries)} entries</span></td></tr>`).join("")}
+        <td class="hide-sm">${c.chain_ok ? '<span class="pill ok">intact</span>' : '<span class="pill bad">broken</span>'}<span class="sub">${esc(plural(c.audit_entries, "entry", "entries"))}</span></td></tr>`).join("")}
       </tbody></table></div>` : `<div class="empty"><b>${list.length ? "No calls match these filters" : "No calls yet"}</b>${list.length ? "Clear the search or pick another source." : "Start a test call in the playground."}</div>`;
     wireRows($("#calls-table"));
   };
@@ -906,7 +909,7 @@ async function renderPolicies(view) {
   const targets = [...S.info.scenarios.map((s) => [s.id, `Scenario: ${s.title}`]), ...S.info.personas.map((x) => [x.id, `Simulated caller: ${x.id}`])];
   view.innerHTML = head("Policies", lede) + `
   <p class="callout">${S.adapter.mode === "live" ? "Applies to calls in this console session only. The voice process loads config/policy.yaml at startup and refuses to start with an invalid file; ship a change by editing the file in a pull request, where CI runs every eval against it." : "Applies to calls in this browser tab only (held in memory). In the repo, a change goes through a pull request and CI runs every eval against it."}</p>
-  <div class="grid two">
+  <div class="grid two pol-grid">
     <section class="card" aria-labelledby="ed-h">
       <div class="card-head"><h2 id="ed-h">config/policy.yaml</h2><span id="pol-state"></span></div>
       <div class="row" style="margin-bottom:8px">
@@ -1037,7 +1040,7 @@ function policyView(p) {
   return `<div class="table-wrap"><table><thead><tr><th>Tool</th><th>Tier</th><th class="hide-sm">Flags</th><th class="hide-sm">Why</th></tr></thead><tbody>
     ${p.tools.map((t) => `<tr><td class="mono">${esc(t.name)}</td><td><span class="tier ${esc(t.tier)}">${esc(t.tier)}</span>${t.enabled ? "" : ' <span class="pill bad">disabled</span>'}</td><td class="hide-sm tiny">${[t.moves_money && "moves money", t.changes_contact && "changes contact", !t.state_changing && "read-only"].filter(Boolean).join(", ")}</td><td class="hide-sm tiny wrap">${esc(t.why)}</td></tr>`).join("")}
   </tbody></table></div>
-  <div class="grid two" style="margin-top:12px">
+  <div class="grid kv-pair" style="margin-top:12px">
     <dl class="kv"><dt>Payment links / call</dt><dd>${esc(p.caps.max_payment_links_per_call)}</dd><dt>USD / call</dt><dd>${esc(usd(p.caps.max_usd_per_call))}</dd><dt>Actions / call</dt><dd>${esc(p.caps.max_actions_per_call)}</dd><dt>Risk threshold</dt><dd>${esc(p.risk.threshold)} (handoff at ${esc(p.risk.handoff_min_tier)}+)</dd></dl>
     <dl class="kv"><dt>Step-up at</dt><dd>${esc(p.step_up.min_tier)}</dd><dt>Wrong codes before lock</dt><dd>${esc(p.step_up.max_failed_attempts)}</dd><dt>Code lifetime</dt><dd>${esc(p.step_up.code_ttl_seconds)} s</dd><dt>Blocking signals</dt><dd class="tiny">${esc(p.step_up.blocking_signals.join(", "))}</dd></dl>
   </div>
@@ -1087,11 +1090,11 @@ async function renderEvals(view) {
     </tbody></table></div></section>
   ${mt ? `<section class="card" aria-labelledby="mt-h"><div class="card-head"><h2 id="mt-h">Mutation tests · ${mt.passed}/${mt.total}</h2><span class="hint">${esc(mt.about)}</span></div>
     <div class="table-wrap"><table><thead><tr><th></th><th>Switched off or weakened</th><th>Caught by</th><th class="hide-sm">Test</th></tr></thead><tbody>
-    ${mt.tests.map((t) => `<tr><td>${t.passed ? '<span class="ok-mark">✓</span>' : '<span class="bad-mark">✗</span>'}</td><td class="wrap">${esc(t.switched_off)}</td><td>${esc(t.caught_by)}</td><td class="hide-sm mono tiny wrap">${esc(t.file)}::${esc(t.test)}</td></tr>`).join("")}
+    ${mt.tests.map((t) => `<tr><td>${t.passed ? '<span class="ok-mark">✓</span>' : '<span class="bad-mark">✗</span>'}</td><td class="wrap">${esc(t.switched_off)}</td><td>${esc(t.caught_by)}</td><td class="hide-sm mono tiny wrap">${wb(t.file + "::" + t.test)}</td></tr>`).join("")}
     </tbody></table></div></section>` : ""}
   <section class="card" aria-labelledby="sc-h"><div class="card-head"><h2 id="sc-h">Simulated callers · ${m.expectations_met}/${m.personas} as expected</h2><span class="hint">evals/personas.yaml · handoffs ${esc(m.handoffs)}</span></div>
     <div class="table-wrap"><table><thead><tr><th></th><th>Persona</th><th>Kind</th><th>Goal</th><th>Tool results</th><th class="hide-sm">Controls</th></tr></thead><tbody>
-    ${sc.personas.map((p) => `<tr><td>${p.correct ? '<span class="ok-mark">✓</span>' : '<span class="bad-mark">✗</span>'}</td><td class="mono">${esc(p.id)}</td><td><span class="tag">${esc(p.kind.replace("_", " "))}</span></td><td>${esc(p.achieved ? "achieved" : "blocked")}<span class="sub">expected ${esc(p.expect)}</span></td><td>${statusChain(p.tool_statuses)}</td><td class="hide-sm">${p.controls.length ? `<span class="chips">${p.controls.map((x) => `<span class="chip neutral">${esc(controlName(x))}</span>`).join("")}</span>` : ""}</td></tr>`).join("")}
+    ${sc.personas.map((p) => `<tr><td>${p.correct ? '<span class="ok-mark">✓</span>' : '<span class="bad-mark">✗</span>'}</td><td class="mono wrap">${esc(p.id)}</td><td><span class="tag">${esc(p.kind.replace("_", " "))}</span></td><td>${esc(p.achieved ? "achieved" : "blocked")}<span class="sub">expected ${esc(p.expect)}</span></td><td>${statusChain(p.tool_statuses)}</td><td class="hide-sm">${p.controls.length ? `<span class="chips">${p.controls.map((x) => `<span class="chip neutral">${esc(controlName(x))}</span>`).join("")}</span>` : ""}</td></tr>`).join("")}
     </tbody></table></div></section>`;
   $("#ev-run")?.addEventListener("click", (e) => act(async () => {
     S.evalsLive = await call("evals_run");
@@ -1147,11 +1150,11 @@ async function renderSettings(view) {
     <p class="hint">${live ? "Which keys are set in the console server's environment (names only). The console itself never calls a provider." : "Shown as configuration: there is no audio pipeline in the browser. Environment variable names are read from each provider's code."}</p>
     <div class="grid three" style="margin-top:10px">${s.providers.map((p) => `<div class="card" style="background:var(--white)">
       <div class="row"><h3 class="mono">${esc(p.name)}</h3>${p.name === selected ? `<span class="pill ok">${live && s.agent_provider_set ? "selected (AGENT_PROVIDER)" : "default"}</span>` : ""}</div>
-      <p class="small" style="margin:6px 0">${esc(p.summary)}</p><p class="tiny muted">${esc(p.kind)} · ${esc(p.class)}</p>
+      <p class="small" style="margin:6px 0">${esc(p.summary.replace(/ -> /g, " → "))}</p><p class="tiny muted">${esc(p.kind)} · ${esc(p.class)}</p>
       <ul class="tiny" style="padding-left:16px;margin:8px 0 0">${p.env.map((n) => `<li><code>${esc(n)}</code> ${live ? (env[n] ? '<span class="ok-mark">set</span>' : '<span class="muted">not set</span>') : ""}</li>`).join("")}</ul></div>`).join("")}</div></section>
   <section class="card" aria-labelledby="tools-h"><div class="card-head"><h2 id="tools-h">Tool endpoints</h2><span class="hint">src/agent/tools.py TOOL_SPECS · tiers from the applied policy</span></div>
     <div class="table-wrap"><table><thead><tr><th>Tool</th><th>Tier</th><th>Route</th><th class="hide-sm">Required</th><th class="hide-sm">What the model sees</th></tr></thead><tbody>
-    ${s.tools.map((t) => `<tr><td class="mono">${esc(t.name)}</td><td><span class="tier ${esc(t.tier || "none")}">${esc(t.tier || "none")}</span></td><td class="mono tiny wrap">${esc(t.route)}${t.keypad_route ? `<span class="sub">keypad: ${esc(t.keypad_route)}</span>` : ""}</td><td class="hide-sm mono tiny">${esc(t.required.join(", ") || "—")}</td><td class="hide-sm tiny wrap">${esc(t.description)}</td></tr>`).join("")}
+    ${s.tools.map((t) => `<tr><td class="mono">${esc(t.name)}</td><td><span class="tier ${esc(t.tier || "none")}">${esc(t.tier || "none")}</span></td><td class="mono tiny wrap">${wb(t.route)}${t.keypad_route ? `<span class="sub">keypad: ${wb(t.keypad_route)}</span>` : ""}</td><td class="hide-sm mono tiny wrap">${esc(t.required.join(", ") || "—")}</td><td class="hide-sm tiny wrap">${esc(t.description)}</td></tr>`).join("")}
     </tbody></table></div></section>
   <section class="card" aria-labelledby="sig-h"><div class="card-head"><h2 id="sig-h">Request signing</h2><span class="hint">src/handlers/_common.py</span></div>
     ${s.signing.enabled ? `<dl class="kv"><dt>Algorithm</dt><dd>${esc(s.signing.algorithm)}</dd><dt>Headers</dt><dd class="mono tiny">${esc(s.signing.headers.join(", "))}</dd><dt>Max clock skew</dt><dd>${esc(s.signing.max_skew_seconds)} s</dd><dt>TOOL_API_SECRET</dt><dd>${esc(s.signing.secret)} · ${esc(s.signing.secret_source)}</dd><dt>Verified by handlers</dt><dd>${esc(s.signing.verified)} accepted · ${esc(s.signing.rejected)} refused (measured)</dd></dl>

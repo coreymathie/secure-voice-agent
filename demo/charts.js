@@ -25,7 +25,8 @@ function niceMax(v) {
 }
 
 function ticks(max) {
-  const n = max <= 4 ? max : 4;
+  // whole-number steps for counts: 10 -> 0,2,4..10 rather than 0,2.5,5..10
+  const n = max <= 5 && Number.isInteger(max) ? max : [4, 5, 2].find((k) => Number.isInteger(max / k)) || 4;
   return Array.from({length: n + 1}, (_, i) => Math.round((max / n) * i * 100) / 100);
 }
 
@@ -34,6 +35,30 @@ function barPath(x, y, w, h, r = 4) {
   const rr = Math.min(r, w, h / 2);
   if (w <= 0) return "";
   return `M${x},${y}h${w - rr}a${rr},${rr} 0 0 1 ${rr},${rr}v${h - 2 * rr}a${rr},${rr} 0 0 1 -${rr},${rr}h-${w - rr}z`;
+}
+
+// Shorten a category label with an ellipsis until it fits in the label column; the full text stays in a <title>.
+function fitLabel(node, text, max) {
+  node.textContent = text;
+  if (typeof node.getComputedTextLength !== "function" || node.getComputedTextLength() <= max) return;
+  let n = text.length;
+  while (n > 1 && node.getComputedTextLength() > max) {
+    n -= 1;
+    node.textContent = text.slice(0, n).trimEnd() + "…";
+  }
+  el("title", {}, node).textContent = text;
+}
+
+// Widest label in px (0 when the SVG isn't laid out), so a narrow chart can give its labels more room.
+function labelWidth(svg, labels) {
+  const t = el("text", {x: 0, y: -100}, svg);
+  let w = 0;
+  for (const l of labels) {
+    t.textContent = l;
+    w = Math.max(w, typeof t.getComputedTextLength === "function" ? t.getComputedTextLength() : 0);
+  }
+  t.remove();
+  return w;
 }
 
 const tip = () => document.getElementById("viz-tip");
@@ -156,13 +181,14 @@ export function stackedBars(container, {rows, series, unit = ""}) {
   container.append(legend(series));
   const BAR = 18, GAP = 14, TOP = 6, AXIS = 22;
   frame(container, rows.length, (host, width) => {
-    const labelW = Math.min(170, Math.round(width * 0.36));
-    const valueW = 34;
-    const plotW = width - labelW - valueW - 8;
     const totals = rows.map((r) => series.reduce((a, s) => a + (r.values[s.key] || 0), 0));
     const max = niceMax(Math.max(1, ...totals));
     const height = TOP + rows.length * (BAR + GAP) + AXIS;
     const svg = el("svg", {viewBox: `0 0 ${width} ${height}`, width, height, role: "group"}, host);
+    const base = Math.min(170, Math.round(width * 0.36));
+    const labelW = Math.max(base, Math.min(Math.round(width * 0.5), Math.ceil(labelWidth(svg, rows.map((r) => r.label))) + 12));
+    const valueW = 34;
+    const plotW = width - labelW - valueW - 8;
     const x = (v) => labelW + (v / max) * plotW;
     for (const t of ticks(max)) {
       el("line", {class: "gridline", x1: x(t), x2: x(t), y1: TOP - 4, y2: height - AXIS + 2}, svg);
@@ -173,7 +199,7 @@ export function stackedBars(container, {rows, series, unit = ""}) {
     rows.forEach((r, i) => {
       const y = TOP + i * (BAR + GAP);
       const name = el("text", {x: labelW - 8, y: y + BAR / 2 + 4, "text-anchor": "end"}, svg);
-      name.textContent = r.label.length > 26 ? r.label.slice(0, 25) + "…" : r.label;
+      fitLabel(name, r.label, labelW - 10);
       let acc = 0;
       const present = series.filter((s) => (r.values[s.key] || 0) > 0);
       present.forEach((s, j) => {
@@ -205,11 +231,12 @@ function totals_(r, series) {
 export function bars(container, {rows, color = "var(--series-1)", name = "count"}) {
   const BAR = 16, GAP = 12, TOP = 6, AXIS = 22;
   frame(container, rows.length, (host, width) => {
-    const labelW = Math.min(210, Math.round(width * 0.44));
-    const plotW = width - labelW - 40;
     const max = niceMax(Math.max(1, ...rows.map((r) => r.value)));
     const height = TOP + rows.length * (BAR + GAP) + AXIS;
     const svg = el("svg", {viewBox: `0 0 ${width} ${height}`, width, height, role: "group"}, host);
+    const base = Math.min(210, Math.round(width * 0.44));
+    const labelW = Math.max(base, Math.min(Math.round(width * 0.56), Math.ceil(labelWidth(svg, rows.map((r) => r.label))) + 12));
+    const plotW = width - labelW - 40;
     const x = (v) => labelW + (v / max) * plotW;
     for (const t of ticks(max)) {
       el("line", {class: "gridline", x1: x(t), x2: x(t), y1: TOP - 4, y2: height - AXIS + 2}, svg);
@@ -220,7 +247,7 @@ export function bars(container, {rows, color = "var(--series-1)", name = "count"
     rows.forEach((r, i) => {
       const y = TOP + i * (BAR + GAP);
       const lab = el("text", {x: labelW - 8, y: y + BAR / 2 + 4, "text-anchor": "end"}, svg);
-      lab.textContent = r.label.length > 30 ? r.label.slice(0, 29) + "…" : r.label;
+      fitLabel(lab, r.label, labelW - 10);
       const node = el("path", {d: barPath(labelW, y, Math.max(2, x(r.value) - labelW), BAR), fill: color}, svg);
       hover(node, r.value.toLocaleString("en-US"), `${r.label} · ${name}`, color);
       const v = el("text", {class: "val", x: x(r.value) + 6, y: y + BAR / 2 + 4}, svg);
