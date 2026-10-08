@@ -20,7 +20,7 @@ function el(tag, attrs = {}, parent) {
 function niceMax(v) {
   if (v <= 0) return 1;
   const p = 10 ** Math.floor(Math.log10(v));
-  for (const m of [1, 2, 2.5, 5, 10]) if (m * p >= v) return m * p;
+  for (const m of [1, 1.2, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10]) if (m * p >= v) return Math.round(m * p * 1e6) / 1e6;
   return 10 * p;
 }
 
