@@ -7,7 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-The console opens on a business. 414 tests, 31 call evals, 22 mutation tests, 14 simulated callers, and a 108-check browser smoke test across both console modes.
+The console opens on a business and reads like a finished contact-center product. 417 tests, 31 call evals, 22 mutation tests, 14 simulated callers, and a 138-check browser smoke test across both console modes.
+
+### Console: member calls and a product-first view
+- **Calls**: the sample credit union's 320 most recent calls, each with a member, reason, outcome, length, the safeguards on the call and a satisfaction rating. Search, filters (reason, outcome, fraud stopped, payment taken, verification not completed, card number scrubbed, Spanish, low satisfaction), paging and CSV export. Calls you place yourself moved to **Calls › Test calls**.
+- **Call page** (`#/call/<id>`): transcript with the safeguard events interleaved, a replay that steps through the call with safeguard markers on its timeline, an AI summary, what the agent did, verification, sentiment, satisfaction, and newer/older navigation.
+- **Business and Technical views**: the default view leaves out code paths, environment variable names, hashes, TwiML and raw JSON; the Technical view (or `?view=technical`) shows them. Test-line setup uses plain labels ("How members pay", "Recording consent"), and each screen opens with what it does for the business.
+- **Overview**: latest calls and recent activity next to the volume chart, one dismissible sample-workspace note instead of a tag on every card, fraud attempts shown as a neutral trend (more stopped isn't good or bad on its own), the recording-consent row relabelled, and dates shown relative to today.
+- **Startup**: the overview, calls and call pages render straight from the data files; Pyodide starts in the background, and if its download is blocked the interactive screens say so instead of the whole console failing.
+- **Guided tour** is offered, not opened over the page, and each step opens the screen it describes; on phones it's a bottom sheet.
+- **Dark theme** (follows the system, with a toggle), a compact header on phones, an unknown-address page, and chart axes that end closer to the data.
+- The test line answers balance and branch-hours questions: balances only after step-up verification. Previously "what's my balance" was taken as a payment.
+- Renamed for the business view: Call logs → Calls, Playground → Test line, This session → Test session.
+
+### Data: recent calls
+- `scripts/sample_calls.py` (called by `generate_sample_company.py`) writes `demo/data/sample_calls.json`: 320 calls on the last day with members, transcripts (some in Spanish), outcomes, transfer reasons, verification, actions, safeguards, sentiment, satisfaction and QA tags, including stopped fraud (social engineering, SIM swap, account takeover). Fictional contact details only: 555-01xx numbers, example.com, card numbers only as "ending in".
+- The daily data now drifts day to day and includes a card-processor outage and a tropical-storm watch, with matching entries in recent activity.
 
 ### Console
 - **Business impact view** for a sample company, Cypress Harbor Credit Union (fictional: 92,400 members, $1.4B in assets, 11 branches). Over 7, 30 or 90 days: calls answered, resolved without a transfer, average call length, payments collected, fraud attempts stopped, verified-before-money-moved rate, member satisfaction and cost avoided (with its per-call cost assumptions shown), each against the previous period, with trend lines; daily volume by outcome; call reasons and how often each is resolved; fraud attempts by type; transfer reasons; compliance checks; recent activity. The previous Overview is now **Overview › This session**.

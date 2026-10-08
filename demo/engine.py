@@ -952,7 +952,7 @@ INTENTS: list[tuple[str, re.Pattern]] = [
             re.I,
         ),
     ),
-    ("take_payment", re.compile(r"\b(pay|paying|payment|invoice|deposit|bill|balance|payoff|pay off)\b", re.I)),
+    ("take_payment", re.compile(r"\b(pay|paying|payment|invoice|bill|payoff|pay off)\b", re.I)),
     (
         "book_meeting",
         re.compile(
@@ -993,10 +993,28 @@ AGENT_SAYS = {
     "sms_failed": "The payment link was created but the text didn't send. A team member will send it to you.",
 }
 
-GREETING = "Hi, thanks for calling. I can book a visit, take a payment, open a support ticket, or update your details."
+GREETING = (
+    "Thanks for calling Cypress Harbor Credit Union. I can check balances, take a loan or card payment, report a "
+    "lost card or a charge you don't recognize, book a loan officer, or update your details."
+)
 HELP = (
-    "I can book a visit, take a payment, open a support ticket, update your contact details, or have someone "
-    "call you back. What would you like to do?"
+    "I can check your balance, take a loan or card payment, report a lost card or a disputed charge, book a "
+    "loan officer, update your contact details, or have someone call you back. What would you like to do?"
+)
+# Questions the agent answers without a tool call (balances only after step-up verification).
+_BALANCE = re.compile(
+    r"\b(balance|how much (money )?(do i have|is in)|available|recent transactions?|paycheck|deposit"
+    r"|did .{0,30}clear)\b",
+    re.I,
+)
+_HOURS = re.compile(r"\b(hours|open|close|closing|closed|branch|branches|location|atm)\b", re.I)
+BALANCE_REPLY = (
+    "Your Everyday Checking has $1,284.16 available and your Share Savings has $6,402.90. The most recent "
+    "transaction is a payroll deposit of $1,912.40 this morning. (Sample balances: this demo has no real accounts.)"
+)
+HOURS_REPLY = (
+    "Most branches are open 9 to 5 on weekdays and 9 to 12 on Saturday; Las Olas and Weston stay open later. "
+    "ATMs are available around the clock."
 )
 ASK = {
     "amount_usd": "How much is the payment for?",
@@ -1078,6 +1096,8 @@ class PlaygroundAgent:
         self.waiting_for: str | None = None  # a slot name, or "code"
         self.pending: dict | None = None  # an intent waiting on a slot
         self.after_verify: dict | None = None  # the tool call to retry once the caller is verified
+        self.verified = False
+        self.read_after_verify = False  # read balances once the caller is verified
 
     # -- hearing the caller --
 
@@ -1120,6 +1140,16 @@ class PlaygroundAgent:
                 return self._propose([("verify_caller", {"code": code}, "the caller read back a code")])
         self._extract(text)
         found = [name for name, rx in INTENTS if rx.search(text)]
+        if _BALANCE.search(text) and not {"take_payment", "update_contact", "create_ticket"} & set(found):
+            if self.verified:
+                return {"reply": BALANCE_REPLY, "proposals": []}
+            self.read_after_verify = True
+            why = "balances are read only to a verified member"
+            out = self._propose([("send_verification_code", {"channel": "sms"}, why)])
+            out["reply"] = "I can read your balances once you're verified."
+            return out
+        if _HOURS.search(text) and not found:
+            return {"reply": HOURS_REPLY, "proposals": []}
         if "create_ticket" in found and "take_payment" in found and not re.search(r"\bthen\b", text, re.I):
             found.remove("take_payment")  # "I was charged twice for my payment" is a complaint, not a payment
         if "log_lead" in found and len(found) > 1:
@@ -1220,7 +1250,12 @@ class PlaygroundAgent:
             self.waiting_for = "code"
         elif status == "invalid_code":
             self.waiting_for = "code"
-        elif status == "verified" and self.after_verify:
+        if status == "verified":
+            self.verified = True
+            if self.read_after_verify:
+                self.read_after_verify = False
+                reply = f"{reply} {BALANCE_REPLY}"
+        if status == "verified" and self.after_verify:
             again = self.after_verify
             self.after_verify = None
             follow.append((again["tool"], again["args"], "retrying now that the caller is verified"))

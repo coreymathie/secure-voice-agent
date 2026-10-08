@@ -2,6 +2,8 @@
 // Secure Voice Agent console: hash-routed screens over one adapter (demo: Pyodide, live: the console server).
 import {detectMode, getToken, makeAdapter, setToken} from "./adapters.js";
 import {bars, columns, sparkline, stackedBars} from "./charts.js";
+import {latestCallsHtml, leaveMemberCall, renderMemberCall, renderMemberCalls, wireMemberRows} from "./members.js";
+import {loadCalls, loadCompany, longDay, shifted, shortDay} from "./sample.js";
 import {crumbs, initShell, openKeys, setActive} from "./shell.js";
 
 const $ = (s, root = document) => root.querySelector(s);
@@ -47,6 +49,10 @@ const S = {
   selftest: null,
   busy: false,
   screen: null,
+  engine: "loading", // "loading" | "ready" | "error": the in-browser runtime (demo) or the console server (live)
+  engineError: null,
+  bootSteps: [],
+  memberCalls: [],
 };
 
 const CATS = {
@@ -172,24 +178,38 @@ function setPolicyChip(ref, modified) {
 
 // ---------- routing ----------
 
-const SUBPAGED = new Set(["overview", "playground"]);
-const SCREENS = {overview: renderOverview, playground: renderPlayground, calls: renderCalls, policies: renderPolicies, evals: renderEvals, settings: renderSettings};
+const SUBPAGED = new Set(["overview", "playground", "calls"]);
+const SCREENS = {overview: renderOverview, playground: renderPlayground, calls: renderCalls, call: renderCallPage, policies: renderPolicies, evals: renderEvals, settings: renderSettings, notfound: renderNotFound};
 
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-  const screen = SCREENS[parts[0]] ? parts[0] : "overview";
+  const screen = !parts.length ? "overview" : SCREENS[parts[0]] && parts[0] !== "notfound" ? parts[0] : "notfound";
   return {screen, rest: parts.slice(1)};
 }
 
+// Screens that read only the sample data files: they render before (or without) the Python runtime.
+const isStatic = (screen, sub) => (screen === "overview" && !sub) || (screen === "calls" && !sub) || screen === "call" || screen === "notfound";
+
 async function route() {
   const {screen, rest} = parseRoute();
-  const sub = SUBPAGED.has(screen) ? rest[0] || "" : "";
+  // #/calls/test is the session's own calls; #/calls/<id> opens one of them in the drawer over that list
+  const sub = screen === "calls" ? (rest[0] ? "test" : "") : SUBPAGED.has(screen) ? rest[0] || "" : "";
   CUR = {screen, sub};
-  setActive(screen, sub);
+  setActive(screen === "call" ? "calls" : screen, sub);
   closeNav();
-  if (!S.ready) return;
-  const drawerId = screen === "calls" ? rest[0] : null;
-  const key = screen + (SUBPAGED.has(screen) ? "/" + (rest[0] || "") : "");
+  if (screen !== "call") leaveMemberCall();
+  const drawerId = screen === "calls" && rest[0] && rest[0] !== "test" ? rest[0] : null;
+  const key = screen + (SUBPAGED.has(screen) ? "/" + sub : "") + (screen === "call" ? "/" + (rest[0] || "") : "");
+  if (!S.ready && !isStatic(screen, sub)) {
+    hideDrawer();
+    if (S.screen !== key || S.waitShown !== S.engine) {
+      S.screen = key;
+      S.waitShown = S.engine;
+      renderEngineWait($("#view"));
+      window.dispatchEvent(new CustomEvent("screen:rendered", {detail: {screen}}));
+    }
+    return;
+  }
   if (S.screen !== key || !drawerId) {
     if (S.screen !== key) {
       S.screen = key;
@@ -215,6 +235,7 @@ async function renderScreen(screen, rest) {
     $("[data-retry]", view)?.addEventListener("click", () => { S.screen = null; route(); });
   }
   document.title = `${$(".sidenav a[aria-current='page']")?.textContent.trim() || "Console"} · Secure Voice Agent`;
+  window.dispatchEvent(new CustomEvent("screen:rendered", {detail: {screen}}));
 }
 
 function hideTip() { const t = $("#viz-tip"); if (t) t.hidden = true; }
@@ -236,38 +257,38 @@ async function renderOverview(view, rest) {
 }
 
 function ovTabs(active) {
-  const tabs = [["business", "Business impact", "#/overview"], ["session", "This session", "#/overview/session"]];
+  const tabs = [["business", "Business impact", "#/overview"], ["session", "Test session", "#/overview/session"]];
   return `<div class="tabs" role="tablist" aria-label="Overview">${tabs.map(([k, label, href]) => `<a role="tab" href="${href}" aria-selected="${k === active}" id="ovtab-${k}">${label}</a>`).join("")}</div>`;
 }
 
 async function renderSessionOverview(view) {
-  view.innerHTML = head("This session", "What the safeguard layer did with every tool call in this console session.") + ovTabs("session") + loadingHtml();
+  view.innerHTML = head("Test session", "What the safeguards did with every action in the calls placed from this browser.") + ovTabs("session") + loadingHtml();
   const o = await call("overview");
   const ev = o.evals || {};
   const sim = ev.simulated_callers;
   const persona = o.by_source.persona || 0;
-  const seeded = persona ? ` ${plural(persona, "of them is", "of them are")} the simulated callers from <code>evals/personas.yaml</code>, played on load.` : "";
+  const seeded = persona ? ` ${plural(persona, "of them is a simulated caller", "of them are simulated callers")} played on load<span class="tech-only"> (<code>evals/personas.yaml</code>)</span>.` : "";
   const ce = ev.call_evals || {};
   const mt = ev.mutation_tests || {};
   const rateLabel = ce.total ? `${Math.round((ce.passed / ce.total) * 100)}%` : "—";
   noteCalls(o.calls, o.recent);
   view.innerHTML = head(
-    "This session",
-    `<span class="tag sim">simulated</span> ${plural(o.calls, "call")} in this session, all simulated: typed caller turns, a scripted agent, and simulated outside services.${seeded} Every number below is counted from the calls' audit logs.`,
+    "Test session",
+    `${plural(o.calls, "test call")} placed from this browser.${seeded} Every number below is counted from the calls' audit logs; the phone line and outside services are simulated.`,
     `<button type="button" class="primary" data-go="#/playground">Start a test call</button>`,
   ) + ovTabs("session") + `
   <section class="tiles" aria-label="Session totals">
     ${tile("Calls", o.calls, `${o.by_source.playground || 0} test · ${o.by_source.scenario || 0} scenario · ${persona} simulated`, "sim")}
-    ${tile("Tool calls", o.tool_calls, "through make_handler()", "sim")}
+    ${tile("Actions attempted", o.tool_calls, "payments, bookings, cases, changes", "sim")}
     ${tile("Allowed", o.counts.allowed, "ran and succeeded", "sim")}
     ${tile("Blocked", o.counts.blocked, "denied before any backend", "sim")}
     ${tile("Stepped up", o.counts.step_up, "needed a verified caller", "sim")}
     ${tile("Handoffs", o.counts.handoff, "sent to a person", "sim")}
     ${tile("Payments", `<span class="nw">${o.payments.link}<small> link</small></span> · <span class="nw">${o.payments.keypad}<small> keypad</small></span>`, `${usd(o.payments.usd)} issued (simulated)`, "sim", true)}
-    ${tile("Audit chains intact", `${o.chains.ok}<small> / ${o.calls}</small>`, o.chains.broken ? `${o.chains.broken} tampered` : "verify_chain() on every call", "sim", true)}
+    ${tile("Audit chains intact", `${o.chains.ok}<small> / ${o.calls}</small>`, o.chains.broken ? `${o.chains.broken} tampered` : "checked on every call", "sim", true)}
   </section>
   <section class="tiles" aria-label="Measured results">
-    ${tile("Call-eval pass rate", ce.total ? `${rateLabel}` : "—", ce.total ? `${ce.passed}/${ce.total} scenarios · python -m evals.run` : "no eval data", "measured", true)}
+    ${tile("Call-eval pass rate", ce.total ? `${rateLabel}` : "—", ce.total ? `${ce.passed}/${ce.total} scenarios` : "no eval data", "measured", true)}
     ${tile("Simulated callers as expected", sim ? `${sim.expectations_met}<small> / ${sim.personas}</small>` : "—", sim ? `false-positive rate ${Math.round(sim.false_positive_rate * 100)}%` : "", "measured", true)}
     ${tile("Mutation tests caught", mt.total ? `${mt.passed}<small> / ${mt.total}</small>` : "—", "a control switched off, the evals fail", "measured", true)}
   </section>
@@ -279,10 +300,10 @@ async function renderSessionOverview(view) {
   <section aria-labelledby="try-h"><h2 id="try-h" style="margin-bottom:10px">What to try</h2><div class="try">
     ${tryCard("Talk your way past the agent", "Pile on urgency, an authority claim, and a new number, then ask to pay. The risk score hands the payment to a person.", "Try it", "talk")}
     ${tryCard("Verify, then pay", "Ask to make a loan payment. The gate asks for step-up; a code lands on the simulated phone on file; read it back.", "Open a test call", "verify")}
-    ${tryCard("Tamper with the audit log", "Open any call, edit one audit entry in place, and watch verify_chain() find the exact line.", "Open call logs", "tamper")}
-    ${tryCard("Weaken the policy", "Lower the risk threshold to 1 in config/policy.yaml, apply it, and re-run the payment-due-today caller.", "Open policies", "policy")}
+    ${tryCard("Tamper with the audit log", "Open any test call, quietly edit one audit entry, and watch verification find the exact line.", "Open test calls", "tamper")}
+    ${tryCard("Weaken the policy", "Lower the risk threshold to 1, apply it, and re-run the payment-due-today caller to see what changes.", "Open policies", "policy")}
   </div></section>
-  <section class="card" aria-labelledby="recent-h"><div class="card-head"><h2 id="recent-h">Recent calls</h2><a href="#/calls">All call logs</a></div>${recentTable(o.recent)}</section>`;
+  <section class="card" aria-labelledby="recent-h"><div class="card-head"><h2 id="recent-h">Recent test calls</h2><a href="#/calls/test">All test calls</a></div>${recentTable(o.recent)}</section>`;
   wireGo(view);
   const rows = Object.entries(o.per_tool).map(([tool, c]) => ({label: tool, values: {...c, other: (c.rejected || 0) + (c.error || 0)}}))
     .sort((a, b) => sum(b.values) - sum(a.values));
@@ -330,7 +351,7 @@ async function tryAction(key, btn) {
     await act(async () => { await newCall(); }, btn);
     go("#/playground");
   } else if (key === "tamper") {
-    go("#/calls");
+    go("#/calls/test");
   } else if (key === "policy") {
     go("#/policies");
   }
@@ -350,15 +371,8 @@ const moneyShort = (n) => {
   return money0(n);
 };
 const mmss = (secs) => `${Math.floor(secs / 60)}m ${String(Math.round(secs % 60)).padStart(2, "0")}s`;
-const shortDate = (iso) => new Date(iso + "T12:00:00").toLocaleDateString("en-US", {month: "short", day: "numeric"});
-
-async function loadCompany() {
-  if (S.company) return S.company;
-  const r = await fetch("./data/sample_company.json", {cache: "no-cache"});
-  if (!r.ok) throw new Error(`Couldn't load the sample company data (HTTP ${r.status})`);
-  S.company = await r.json();
-  return S.company;
-}
+const BANNER_KEY = "sva-sample-banner";
+const bannerHidden = () => { try { return localStorage.getItem(BANNER_KEY) === "hidden"; } catch { return false; } };
 
 function agg(days) {
   const t = {calls: 0, contained: 0, transferred: 0, abandoned: 0, after_hours: 0, payments: 0, payment_usd: 0, stepups: 0, stepup_passed: 0, fraud_blocked: 0, sim_swap_holds: 0, social_engineering_handoffs: 0, takeover_patterns: 0, otp_lockouts: 0, pii_scrubbed: 0, handle: 0, csat: 0};
@@ -380,6 +394,7 @@ function delta(cur, prev, {better = "up", kind = "pct"} = {}) {
   const change = kind === "pts" ? (cur - prev) * 100 : ((cur - prev) / Math.abs(prev)) * 100;
   if (Math.abs(change) < 0.05) return '<span class="delta flat">no change</span>';
   const up = change > 0;
+  if (better === "none") return `<span class="delta flat" title="vs the previous period"><span aria-hidden="true">${up ? "▲" : "▼"}</span> ${up ? "+" : "−"}${Math.abs(change).toFixed(1)}%</span>`;
   const good = (better === "up") === up;
   const label = kind === "pts" ? `${up ? "+" : "−"}${Math.abs(change).toFixed(1)} pts` : `${up ? "+" : "−"}${Math.abs(change).toFixed(1)}%`;
   return `<span class="delta ${good ? "good" : "bad"}" title="vs the previous period"><span aria-hidden="true">${up ? "▲" : "▼"}</span> ${label}</span>`;
@@ -390,8 +405,8 @@ function kpi(k, v, sub, d, spark) {
 }
 
 async function renderBusiness(view) {
-  view.innerHTML = head("Overview", "How the voice agent is performing for the business.") + ovTabs("business") + loadingHtml("Loading the sample company…");
-  const data = await loadCompany();
+  view.innerHTML = head("Overview", "How the voice agent is performing for the business.") + ovTabs("business") + loadingHtml("Loading…");
+  const [data, calls] = await Promise.all([loadCompany(), loadCalls()]);
   const range = S.range || 30;
   const all = data.days;
   const days = all.slice(-range);
@@ -403,57 +418,62 @@ async function renderBusiness(view) {
   const series = (f) => days.map(f);
   const co = data.company;
   const intentScale = range / 30;
-  const period = `${shortDate(days[0].date)} – ${shortDate(days[days.length - 1].date)}, 2026`;
+  const period = `${longDay(days[0].date)} – ${longDay(days[days.length - 1].date)}, ${shifted(days[days.length - 1].date).getFullYear()}`;
 
   view.innerHTML = head(
     "Overview",
-    `How the voice agent is performing for <b>${esc(co.name)}</b>. <span class="tag sample">sample company</span> Fictional data, generated for this demo, so the console can be judged at business scale.`,
+    `How the AI voice agent is performing for <b>${esc(co.name)}</b>'s members.`,
     `<div class="seg" role="group" aria-label="Date range">${RANGES.map(([n, label]) => `<button type="button" data-range="${n}" aria-pressed="${n === range}">${label}</button>`).join("")}</div>
-     <button type="button" class="primary" data-go="#/playground">Start a test call</button>`,
+     <button type="button" class="primary" data-go="#/calls">View calls</button><button type="button" data-go="#/playground">Test the agent</button>`,
   ) + ovTabs("business") + `
-  <div class="sample-banner" role="note"><b>Sample company data.</b> ${esc(co.name)} is fictional: ${num(co.members)} members, ${moneyShort(co.assets_usd)} in assets, ${co.branches} branches. These numbers come from <code>${esc(data.generated_by)}</code> (seed ${esc(data.seed)}), not from a real deployment. Measured results are on <a href="#/evals">Evals</a>; calls you run here are on <a href="#/overview/session">This session</a>.</div>
+  ${bannerHidden() ? "" : `<div class="sample-banner" role="note" id="sample-banner"><p><b>Sample workspace.</b> ${esc(co.name)} is a fictional credit union (${num(co.members)} members, ${moneyShort(co.assets_usd)} in assets, ${co.branches} branches). Its members, calls and numbers are generated for this demo<span class="tech-only"> by <code>${esc(data.generated_by)}</code> (seed ${esc(data.seed)})</span>; the safety test results under <a href="#/evals">Evals</a> are measured on the real code.</p><button type="button" class="ghost sm" id="banner-x" aria-label="Dismiss the sample workspace note">Dismiss</button></div>`}
   <p class="period muted small">${esc(period)} · ${range} days${p ? ` · compared with the ${range} days before` : ""}</p>
   <section class="tiles kpis" aria-label="Key results">
     ${kpi("Calls answered by the agent", num(t.calls), `${num(Math.round(t.calls / range))} a day · ${num(t.after_hours)} after hours`, delta(t.calls, p?.calls), sparkline(series((d) => d.calls)))}
     ${kpi("Resolved without a transfer", pct(t.containment, 1), `${num(t.contained)} calls fully handled`, delta(t.containment, p?.containment, {kind: "pts"}), sparkline(series((d) => d.contained / d.calls)))}
     ${kpi("Average call length", mmss(t.avg_handle), "from greeting to resolution", delta(t.avg_handle, p?.avg_handle, {better: "down"}), sparkline(series((d) => d.avg_handle_seconds)))}
     ${kpi("Payments collected", moneyShort(t.payment_usd), `${num(t.payments)} loan and card payments`, delta(t.payment_usd, p?.payment_usd), sparkline(series((d) => d.payment_usd)))}
-    ${kpi("Fraud attempts stopped", num(t.fraud_blocked), "social engineering, SIM swaps, takeovers", delta(t.fraud_blocked, p?.fraud_blocked, {better: "down"}), sparkline(series((d) => d.fraud_blocked), {color: "var(--warm)"}))}
+    ${kpi("Fraud attempts stopped", num(t.fraud_blocked), "social engineering, SIM swaps, takeovers", delta(t.fraud_blocked, p?.fraud_blocked, {better: "none"}), sparkline(series((d) => d.fraud_blocked), {color: "var(--warm)"}))}
     ${kpi("Verified before money moved", pct(t.stepup_rate, 1), `${num(t.stepup_passed)} of ${num(t.stepups)} step-ups passed`, delta(t.stepup_rate, p?.stepup_rate, {kind: "pts"}), sparkline(series((d) => d.stepup_passed / d.stepups)))}
     ${kpi("Member satisfaction", `${t.csat_avg.toFixed(2)}<small> / 5</small>`, "post-call survey", delta(t.csat_avg, p?.csat_avg), sparkline(series((d) => d.csat)))}
     ${kpi("Member-services cost avoided", moneyShort(saved), `at $${a.agent_cost_per_call_usd.toFixed(2)} per agent call vs $${a.ai_cost_per_call_usd.toFixed(2)} per AI call`, delta(saved, p ? p.contained * (a.agent_cost_per_call_usd - a.ai_cost_per_call_usd) : null), sparkline(series((d) => d.contained)))}
   </section>
   <section class="card" aria-labelledby="vol-h">
-    <div class="card-head"><h2 id="vol-h">Daily call volume and outcome</h2><span class="tag sample">sample</span><p class="hint">Every call is answered by the agent first. Calls it can't finish go to member services with the context attached.</p></div>
+    <div class="card-head"><h2 id="vol-h">Daily call volume and outcome</h2><p class="hint">Every call is answered by the agent first. Calls it can't finish go to member services with the context attached.</p></div>
     <div id="chart-volume"></div>
   </section>
   <div class="grid two">
+    <section class="card" aria-labelledby="lc-h">
+      <div class="card-head"><h2 id="lc-h">Latest calls</h2><a href="#/calls">All calls →</a><p class="hint">Open a call for its transcript, what the agent did, and the safeguards that stepped in.</p></div>
+      ${latestCallsHtml(calls, 7)}
+    </section>
+    <section class="card" aria-labelledby="note-h">
+      <div class="card-head"><h2 id="note-h">Recent activity</h2></div>
+      <ol class="events">${data.notable.slice(0, 6).map((n) => `<li class="ev-${esc(n.kind)}"><span class="ev-dot" aria-hidden="true"></span><div><p class="ev-meta">${esc(shortDay(n.date))} · ${esc({fraud: "Fraud", ops: "Operations", compliance: "Compliance"}[n.kind] || n.kind)}</p><h3>${esc(n.title)}</h3><p>${esc(n.detail)}</p></div></li>`).join("")}</ol>
+    </section>
+  </div>
+  <div class="grid two">
     <section class="card" aria-labelledby="int-h">
-      <div class="card-head"><h2 id="int-h">What members call about</h2><span class="tag sample">sample</span><p class="hint">Share of calls and how often the agent resolves each one on its own.</p></div>
+      <div class="card-head"><h2 id="int-h">What members call about</h2><p class="hint">Share of calls and how often the agent resolves each one on its own.</p></div>
       ${intentTable(data.intents, intentScale)}
     </section>
     <div class="stack">
       <section class="card" aria-labelledby="risk-h">
-        <div class="card-head"><h2 id="risk-h">Fraud attempts stopped</h2><span class="tag sample">sample</span><p class="hint">Stopped before any money moved or any account detail changed.</p></div>
+        <div class="card-head"><h2 id="risk-h">Fraud attempts stopped</h2><p class="hint">Stopped before any money moved or any account detail changed.</p></div>
         <div id="chart-risk"></div>
         <a class="card-link" href="#/playground/scenarios">See each control in a guided scenario →</a>
       </section>
       <section class="card" aria-labelledby="xfer-h">
-        <div class="card-head"><h2 id="xfer-h">Why calls went to a person</h2><span class="tag sample">sample</span><p class="hint">Transfers carry the reason and the call summary to member services.</p></div>
+        <div class="card-head"><h2 id="xfer-h">Why calls went to a person</h2><p class="hint">Transfers carry the reason and the call summary to member services.</p></div>
         <div id="chart-xfer"></div>
       </section>
     </div>
   </div>
   <div class="grid two">
     <section class="card" aria-labelledby="comp-h">
-      <div class="card-head"><h2 id="comp-h">Compliance</h2><span class="tag sample">sample</span><p class="hint">Controls examiners ask about, checked on every call.</p></div>
+      <div class="card-head"><h2 id="comp-h">Compliance</h2><p class="hint">Controls examiners ask about, checked on every call.</p></div>
       ${complianceList(data.compliance, t)}
     </section>
-    <section class="card" aria-labelledby="note-h">
-      <div class="card-head"><h2 id="note-h">Recent activity</h2><span class="tag sample">sample</span></div>
-      <ol class="events">${data.notable.map((n) => `<li class="ev-${esc(n.kind)}"><span class="ev-dot" aria-hidden="true"></span><div><p class="ev-meta">${esc(shortDate(n.date))} · ${esc({fraud: "Fraud", ops: "Operations", compliance: "Compliance"}[n.kind] || n.kind)}</p><h3>${esc(n.title)}</h3><p>${esc(n.detail)}</p></div></li>`).join("")}</ol>
-    </section>
-  </div>
   <section class="card" aria-labelledby="co-h">
       <div class="card-head"><h2 id="co-h">About this workspace</h2><span class="tag sample">fictional</span></div>
       <dl class="facts wide">
@@ -467,10 +487,13 @@ async function renderBusiness(view) {
         <div><dt>Oversight</dt><dd>${co.regulators.map(esc).join(", ")}</dd></div>
       </dl>
       <p class="hint">Cost assumptions: ${esc(a.note)}</p>
-  </section>`;
+  </section>
+  </div>`;
   wireGo(view);
+  wireMemberRows(view, go);
+  $("#banner-x", view)?.addEventListener("click", () => { try { localStorage.setItem(BANNER_KEY, "hidden"); } catch { /* storage blocked */ } $("#sample-banner")?.remove(); });
   $$("[data-range]", view).forEach((b) => b.addEventListener("click", () => { S.range = Number(b.dataset.range); S.screen = null; route(); }));
-  const pts = days.map((d) => ({label: new Date(d.date + "T12:00:00").toLocaleDateString("en-US", {weekday: "short", month: "short", day: "numeric"}), short: shortDate(d.date), values: {contained: d.contained, transferred: d.transferred, abandoned: d.abandoned}}));
+  const pts = days.map((d) => ({label: longDay(d.date), short: shortDay(d.date), values: {contained: d.contained, transferred: d.transferred, abandoned: d.abandoned}}));
   columns($("#chart-volume", view), {points: pts, series: [
     {key: "contained", label: "Resolved by the agent", color: "var(--series-3)"},
     {key: "transferred", label: "Transferred to member services", color: "var(--series-1)"},
@@ -499,7 +522,7 @@ function complianceList(c, t) {
     ["ok", "AI disclosure played on every call", pct(c.ai_disclosure_rate), "Fixed text from Twilio, before the model says anything"],
     ["ok", "Audit logs verified intact", pct(c.audit_chains_verified_rate), "Hash chain checked per call; any edit is detected"],
     ["ok", "Card numbers heard by the agent", String(c.card_numbers_spoken_to_agent), "Keypad payments keep cards out of the model and the recording"],
-    ["ok", "Recording consent asked where required", pct(c.recording_consent_asked_rate), "All-party consent states; " + pct(c.recording_declined_rate) + " declined and weren't recorded"],
+    ["ok", "Recording consent asked where the law requires it", "100%", `${pct(c.recording_consent_asked_rate)} of calls came from all-party consent states; ${pct(c.recording_declined_rate)} of those declined and weren't recorded`],
     ["ok", "Identifiers scrubbed before leaving the agent", num(t.pii_scrubbed), "Cards and SSNs removed from tickets, CRM notes and logs"],
   ];
   return `<ul class="checklist">${rows.map(([k, label, v, why]) => `<li class="${k}"><span class="ck" aria-hidden="true">✓</span><div><b>${esc(label)}</b><span class="hint">${esc(why)}</span></div><span class="cv">${esc(v)}</span></li>`).join("")}</ul>`;
@@ -543,7 +566,7 @@ async function newCall() {
 async function renderPlayground(view, rest) {
   const tab = rest[0] || "call";
   const tabs = [["call", "Test call", "#/playground"], ["scenarios", "Guided scenarios", "#/playground/scenarios"], ["callers", "Simulated callers", "#/playground/callers"]];
-  view.innerHTML = head("Playground", "Act as the caller. A scripted agent turns what you type into tool calls, and every call goes through the repo's real <code>make_handler()</code> and safeguards. <span class=\"tag sim\">simulated</span> no phone line and no language model.")
+  view.innerHTML = head("Test line", "Play the member. Ask the agent to take a payment, change your email or book an appointment, or try to talk your way past it. Every action goes through the agent's real safeguard code.<span class=\"tech-only\"> A scripted agent stands in for the language model; each action runs through <code>make_handler()</code> with simulated outside services.</span>")
     + `<div class="tabs" role="tablist" aria-label="Playground">${tabs.map(([k, label, href]) => `<a role="tab" href="${href}" aria-selected="${k === tab}" id="tab-${k}">${label}</a>`).join("")}</div><div id="pg-body">${loadingHtml()}</div>`;
   const body = $("#pg-body", view);
   if (tab === "scenarios") return renderScenarios(body);
@@ -556,18 +579,18 @@ function setupHtml() {
   const opt = (v, cur, label) => `<option value="${esc(v)}" ${v === cur ? "selected" : ""}>${esc(label)}</option>`;
   return `<section class="card setup" aria-labelledby="setup-h">
     <div class="card-head"><h2 id="setup-h">Call setup</h2></div>
-    <p class="hint">Twilio plays a fixed AI disclosure before the agent connects, then asks for recording consent where needed (src/handlers/call_start.py).</p>
+    <p class="hint">Before the agent joins, the phone system plays an AI disclosure and asks for recording consent where state law requires it.<span class="tech-only"> (src/handlers/call_start.py)</span></p>
     <form id="setup-form">
       <div class="fields">
-        <div><label for="su-state">Caller's state <span class="opt">(FromState)</span></label><select id="su-state">${opt("CA", s.state, "CA · all-party")}${opt("FL", s.state, "FL · all-party")}${opt("TX", s.state, "TX · one-party")}${opt("NY", s.state, "NY · one-party")}${opt("", s.state, "unknown")}</select></div>
-        <div><label for="su-mode">RECORDING_CONSENT_MODE</label><select id="su-mode">${opt("by_jurisdiction", s.mode, "by_jurisdiction")}${opt("always", s.mode, "always")}${opt("off", s.mode, "off")}</select></div>
-        <div><label for="su-digits">At the consent prompt</label><select id="su-digits">${opt("1", s.digits, "caller presses 1")}${opt("2", s.digits, "caller presses 2")}${opt("", s.digits, "caller says nothing")}</select></div>
-        <div><label for="su-pay">PAYMENT_MODE</label><select id="su-pay">${opt("link", s.payment_mode, "link (SMS)")}${opt("keypad", s.payment_mode, "keypad (Twilio <Pay>)")}</select></div>
+        <div><label for="su-state">Caller's state <span class="opt tech-only">(FromState)</span></label><select id="su-state">${opt("CA", s.state, "California · all-party consent")}${opt("FL", s.state, "Florida · all-party consent")}${opt("TX", s.state, "Texas · one-party consent")}${opt("NY", s.state, "New York · one-party consent")}${opt("", s.state, "Unknown")}</select></div>
+        <div><label for="su-mode">Recording consent <span class="opt tech-only">(RECORDING_CONSENT_MODE)</span></label><select id="su-mode">${opt("by_jurisdiction", s.mode, "Ask where state law requires")}${opt("always", s.mode, "Always ask")}${opt("off", s.mode, "Never ask")}</select></div>
+        <div><label for="su-digits">At the consent prompt, the caller</label><select id="su-digits">${opt("1", s.digits, "presses 1 (agrees)")}${opt("2", s.digits, "presses 2 (declines)")}${opt("", s.digits, "does nothing")}</select></div>
+        <div><label for="su-pay">How members pay <span class="opt tech-only">(PAYMENT_MODE)</span></label><select id="su-pay">${opt("link", s.payment_mode, "Secure link by text")}${opt("keypad", s.payment_mode, "Card on the phone keypad")}</select></div>
       </div>
       <div class="checks">
-      <label class="check"><input type="checkbox" id="su-rec" ${s.recording_enabled ? "checked" : ""}> RECORDING_ENABLED</label>
-      <label class="check"><input type="checkbox" id="su-swap" ${s.sim_swap ? "checked" : ""}> SIM swap reported for the number on file</label>
-      <label class="check"><input type="checkbox" id="su-verified" ${s.start_verified ? "checked" : ""}> Caller already verified (fixture)</label>
+      <label class="check"><input type="checkbox" id="su-rec" ${s.recording_enabled ? "checked" : ""}> Record calls <span class="opt tech-only">(RECORDING_ENABLED)</span></label>
+      <label class="check"><input type="checkbox" id="su-swap" ${s.sim_swap ? "checked" : ""}> Carrier reports a recent SIM swap on the member's phone</label>
+      <label class="check"><input type="checkbox" id="su-verified" ${s.start_verified ? "checked" : ""}> Member is already verified</label>
       </div>
       <div class="row" style="margin-top:12px"><button type="submit" class="primary" id="start-call">Start a new call</button></div>
     </form>
@@ -589,24 +612,24 @@ async function renderTestCall(body) {
       <div class="chat-head">
         <h2 id="chat-h" class="mono" style="font-size:14px">${esc(d.id)}</h2><span class="pill ok" id="call-status">on the line</span>
         <div class="chat-tools">
-          <span class="clock" id="clock" title="Simulated clock (drives the velocity windows)">${fmtClock(d.clock_s)}</span>
-          <button type="button" class="sm" data-adv="30">+30 s</button>
-          <button type="button" class="sm" data-adv="150">+2.5 min</button>
+          <span class="clock" id="clock" title="Call time (simulated; drives the rate limits)">${fmtClock(d.clock_s)}</span>
+          <button type="button" class="sm" data-adv="30" title="Skip ahead 30 seconds">+30 s</button>
+          <button type="button" class="sm" data-adv="150" title="Skip ahead 2.5 minutes">+2.5 min</button>
           <button type="button" class="sm warn" id="end-call">End call</button>
         </div>
       </div>
       <div class="chat" id="chat" aria-live="polite" aria-label="Call transcript"></div>
       <div id="pending"></div>
       <div class="composer">
-        <form id="say-form"><label class="sr" for="say-text">What the caller says</label><input id="say-text" autocomplete="off" placeholder="Say something as the caller…"><button class="primary" type="submit" id="say-btn">Say</button></form>
+        <form id="say-form"><label class="sr" for="say-text">What the caller says</label><input id="say-text" autocomplete="off" placeholder="Say something as the member, e.g. what's my balance?"><button class="primary" type="submit" id="say-btn">Say</button></form>
         <div class="quick" aria-label="Example caller lines">${QUICK.map(([l, t]) => `<button type="button" data-say="${esc(t)}">${esc(l)}</button>`).join("")}</div>
-        <label class="check" style="margin:0"><input type="checkbox" id="auto-run" ${S.autoRun ? "checked" : ""}> <span>Run the agent's tool calls automatically <span class="muted">(off: review and edit each one first)</span></span></label>
-        <p class="hint">Scripted agent: keyword rules stand in for the model and are gullible on purpose; each caller turn advances the simulated clock 15 s.</p>
+        <label class="check tech-only" style="margin:0"><input type="checkbox" id="auto-run" ${S.autoRun ? "checked" : ""}> <span>Run the agent's tool calls automatically <span class="muted">(off: review and edit each one first)</span></span></label>
+        <p class="hint">The demo agent follows simple rules instead of a language model, and does whatever the caller asks on purpose, so everything it's stopped from doing is stopped by the safeguards.<span class="tech-only"> Each caller turn advances the simulated clock 15 s.</span></p>
       </div>
     </section>
     <div class="side" id="side"></div>
   </div>
-  <details class="card" id="model-box"><summary><b>Act as the model: call any tool directly</b> <span class="hint">(including one nobody granted)</span></summary>
+  <details class="card tech-only" id="model-box"><summary><b>Act as the model: call any tool directly</b> <span class="hint">(including one nobody granted)</span></summary>
     <form id="tool-form" style="margin-top:10px">
       <div class="row fill"><label class="sr" for="tool-name">Tool</label><select id="tool-name" style="width:auto">${Object.keys(TOOL_TEMPLATES).map((t) => `<option>${t}</option>`).join("")}</select><span id="tool-tier"></span></div>
       <label for="tool-args">Arguments (JSON)</label><textarea id="tool-args" rows="5" class="mono"></textarea>
@@ -656,7 +679,7 @@ function wireCall(root) {
   $("#end-call", root).addEventListener("click", (e) => act(async () => {
     const d = await call("end_call", {call_id: S.callId});
     paintCall(d);
-    toast(`Call ${d.id} ended. It's in Call logs.`);
+    toast(`Call ${d.id} ended. It's under Calls › Test calls.`);
   }, e.currentTarget));
   $("#auto-run", root).addEventListener("change", (e) => { S.autoRun = e.target.checked; });
   const sel = $("#tool-name", root);
@@ -694,7 +717,7 @@ function paintCall(d) {
 function eventHtml(ev, d) {
   switch (ev.kind) {
     case "call_start": return startHtml(ev);
-    case "agent": return `<div class="msg agent"><span class="who">Agent (scripted)</span>${esc(ev.text)}</div>`;
+    case "agent": return `<div class="msg agent"><span class="who">Agent</span>${esc(ev.text)}</div>`;
     case "caller": return callerHtml(ev);
     case "tool": return toolCardHtml(d.tool_calls[ev.index]);
     case "clock": return `<div class="msg system">Clock advanced ${esc(ev.seconds)} s → ${fmtClock(ev.at)}</div>`;
@@ -706,10 +729,10 @@ function eventHtml(ev, d) {
 function startHtml(ev) {
   const a = ev.audit || {};
   const recPill = a.recording === "started" ? "ok" : a.recording === "refused_no_consent" ? "bad" : "";
-  return `<div class="msg start"><span class="who">Twilio plays (before the agent connects)</span>
+  return `<div class="msg start"><span class="who">Phone system plays (before the agent connects)</span>
     ${(ev.say || []).map((s) => `<p class="quote">“${esc(s)}”</p>`).join("")}
     <div class="chips" style="margin-top:6px"><span class="chip ok">disclosure ${esc(a.disclosure)}</span><span class="chip neutral">consent ${esc(a.consent)}</span><span class="chip neutral">${esc(a.jurisdiction)}</span><span class="pill ${recPill}">recording ${esc(a.recording)}</span></div>
-    <details class="more"><summary>TwiML (${(ev.twiml || []).length} response${(ev.twiml || []).length === 1 ? "" : "s"})</summary><pre>${esc((ev.twiml || []).map((x) => x.replace(/></g, ">\n<")).join("\n\n--- consent action ---\n"))}</pre></details>
+    <details class="more tech-only"><summary>TwiML (${(ev.twiml || []).length} response${(ev.twiml || []).length === 1 ? "" : "s"})</summary><pre>${esc((ev.twiml || []).map((x) => x.replace(/></g, ">\n<")).join("\n\n--- consent action ---\n"))}</pre></details>
   </div>`;
 }
 
@@ -718,7 +741,7 @@ function callerHtml(ev) {
     return `<div class="msg caller dropped"><span class="who">Caller</span>Dropped: keypad capture in progress. Nothing said or keyed reaches the agent or its risk scorer.</div>`;
   }
   const sig = Object.entries(ev.signals || {});
-  return `<div class="msg caller"><span class="who">Caller · risk ${esc(ev.risk_score)}</span>${esc(ev.text)}${sig.length ? `<div class="chips">${sig.map(([k, v]) => `<span class="chip">${esc(k)} +${esc(v)}</span>`).join("")}</div>` : ""}</div>`;
+  return `<div class="msg caller"><span class="who">Member · risk score ${esc(ev.risk_score)}</span>${esc(ev.text)}${sig.length ? `<div class="chips">${sig.map(([k, v]) => `<span class="chip">${esc(k)} +${esc(v)}</span>`).join("")}</div>` : ""}</div>`;
 }
 
 function stagesHtml(stages) {
@@ -736,8 +759,8 @@ function toolCardHtml(t) {
     <div class="head">${badge(status)}<span class="tool">${esc(t.tool)}</span>${tierTag(t.tool)}${mismatch ? `<span class="bad-mark">expected ${esc(t.expect)}</span>` : t.expect ? '<span class="ok-mark">✓ as expected</span>' : ""}<span class="when">${fmtClock(t.at)}</span></div>
     ${t.why ? `<div class="why">${t.proposed ? "Agent" : "Model"}: ${esc(t.why)}</div>` : ""}
     ${stagesHtml(t.stages)}
-    ${why ? `<p class="reason">Audit reason: <code>${esc(why)}</code></p>` : ""}
-    <details class="more"><summary>Arguments, result, what the backend received</summary>
+    ${why ? `<p class="reason">Why: <code>${esc(why)}</code></p>` : ""}
+    <details class="more tech-only"><summary>Arguments, result, what the backend received</summary>
       <div class="two">
         <div class="box"><h4>Model asked for</h4><pre>${highlight(json(t.args))}</pre></div>
         <div class="box"><h4>Model was told</h4><pre>${highlight(json(t.result))}</pre></div>
@@ -786,25 +809,25 @@ function paintSide(d) {
       ${meter("USD issued", p.usd_issued, p.max_usd_per_call, esc(usd(p.usd_issued)), usd(p.max_usd_per_call))}
       ${meter("Actions completed", p.actions_completed, p.max_actions_per_call, esc(p.actions_completed))}
     </div>
-    <p class="hint" style="margin-top:8px">${p.contact_changed ? '<span class="pill warn">contact changed this call</span> ' : ""}Policy ${esc(d.policy_ref)} · step-up at ${esc(p.step_up_min_tier)} tier · recording ${esc(d.recording || "n/a")}</p>
+    <p class="hint" style="margin-top:8px">${p.contact_changed ? '<span class="pill warn">contact changed this call</span> ' : ""}<span class="tech-only">Policy ${esc(d.policy_ref)} · </span>verification needed for ${esc(p.step_up_min_tier)}-risk actions and above · recording ${esc(d.recording || "n/a")}</p>
   </section>
   <section class="card" aria-labelledby="phone-h"><div class="card-head"><h2 id="phone-h">Phone on file</h2><span class="tag sim">simulated</span></div>
-    <p class="hint">Caller ID only looks the customer up. One-time codes go to the mobile on file.</p>
+    <p class="hint">Caller ID only looks the member up; it never proves who they are. One-time codes go to the mobile number on file.</p>
     <div class="idrow"><div>Caller ID<b>${esc(ph.caller_id)}</b></div><div>Phone on file<b>${esc(ph.phone_on_file)}</b></div></div>
     <div class="inbox" style="margin-top:8px" aria-live="polite">${ph.messages.length ? ph.messages.slice().reverse().map((m) => `<div class="sms"><span>${fmtClock(m.at)} ${esc(m.channel)} to ${esc(m.to)}: code <b>${esc(m.code)}</b></span>${active ? `<button type="button" class="sm" data-code="${esc(m.code)}">Read it to the agent</button>` : ""}</div>`).join("") : '<span class="hint">No messages yet.</span>'}</div>
-    <label class="check"><input type="checkbox" id="swap" ${ph.sim_swap ? "checked" : ""} ${active ? "" : "disabled"}> SIM swap reported (risk-signal hook)</label>
+    <label class="check"><input type="checkbox" id="swap" ${ph.sim_swap ? "checked" : ""} ${active ? "" : "disabled"}> Carrier reports a recent SIM swap</label>
   </section>
   <section class="card" aria-labelledby="pay-h"><div class="card-head"><h2 id="pay-h">Payments</h2>
       <div class="seg" role="group" aria-label="PAYMENT_MODE"><button type="button" data-mode="link" aria-pressed="${k.mode === "link"}" ${active ? "" : "disabled"}>link</button><button type="button" data-mode="keypad" aria-pressed="${k.mode === "keypad"}" ${active ? "" : "disabled"}>keypad</button></div></div>
-    <p class="hint">${k.mode === "keypad" ? "take_payment passes the same gate, then the recording is paused and the call goes to Twilio &lt;Pay&gt;. Nothing is redirected here: you play Twilio's result." : "take_payment texts a Stripe payment link to the calling number only."}</p>
+    <p class="hint">${k.mode === "keypad" ? "Payments pass the same checks, then the recording pauses and the member keys their card into the payment processor. The agent never hears the digits. Here you play the processor's result." : "Payments are sent as a secure link by text, only to the phone number on file."}</p>
     <div class="row" style="margin-top:8px;gap:6px">
       <span class="pill ${k.capture.active ? "bad" : ""}" id="kp-capture">${k.capture.active ? "capture in progress" : "no capture"}</span>
       <span class="pill ${k.capture.transcript_suppressed ? "ok" : ""}" id="kp-transcript">${k.capture.transcript_suppressed ? "transcript suppressed" : "transcript on"}</span>
       <span class="pill ${k.capture.recording_paused ? "ok" : ""}">${k.capture.recording_paused ? "recording paused" : "recording not paused"}</span>
     </div>
     ${k.mode === "keypad" || k.pay_twiml ? `<div class="row" style="margin-top:8px"><button type="button" class="sm" data-kp="success" ${k.capture.active ? "" : "disabled"}>Twilio result: success</button><button type="button" class="sm warn" data-kp="payment-connector-error" ${k.capture.active ? "" : "disabled"}>connector error</button></div>
-    <div class="box" style="margin-top:8px"><h4>&lt;Pay&gt; TwiML preview</h4><pre id="kp-pay">${esc(k.pay_twiml ? k.pay_twiml.replace(/></g, ">\n<") : "none yet: ask to pay")}</pre></div>
-    ${k.resume_twiml ? `<div class="box" style="margin-top:8px"><h4>TwiML back to the agent</h4><pre id="kp-resume">${esc(k.resume_twiml.replace(/></g, ">\n<"))}</pre></div>` : ""}` : ""}
+    <div class="box tech-only" style="margin-top:8px"><h4>&lt;Pay&gt; TwiML preview</h4><pre id="kp-pay">${esc(k.pay_twiml ? k.pay_twiml.replace(/></g, ">\n<") : "none yet: ask to pay")}</pre></div>
+    ${k.resume_twiml ? `<div class="box tech-only" style="margin-top:8px"><h4>TwiML back to the agent</h4><pre id="kp-resume">${esc(k.resume_twiml.replace(/></g, ">\n<"))}</pre></div>` : ""}` : ""}
   </section>`;
   $$("[data-code]", side).forEach((b) => b.addEventListener("click", () => say(`My code is ${b.dataset.code}`)));
   $("#swap", side).addEventListener("change", (e) => act(async () => paintCall(await call("sim_swap", {call_id: S.callId, on: e.target.checked}))));
@@ -814,7 +837,7 @@ function paintSide(d) {
 
 async function renderScenarios(body) {
   const list = S.info.scenarios;
-  body.innerHTML = `<div class="row" style="margin:16px 0 12px"><p class="hint">${list.length} scripted calls, each played through the real handler with an expected outcome per tool call. <code>tests/test_demo_engine.py</code> checks the same expectations in CI.</p><span class="spacer"></span><button type="button" id="run-all-scen">Run all ${list.length}</button></div>
+  body.innerHTML = `<div class="row" style="margin:16px 0 12px"><p class="hint">${list.length} scripted calls that each show one safeguard at work, with the outcome it should have.<span class="tech-only"> <code>tests/test_demo_engine.py</code> checks the same expectations in CI.</span></p><span class="spacer"></span><button type="button" id="run-all-scen">Run all ${list.length}</button></div>
     <div class="scen-grid">${list.map((s) => `<article class="card scen" id="scen-${esc(s.id)}">
       <div class="row"><h3>${esc(s.title)}</h3>${s.start_verified ? '<span class="tag">pre-verified</span>' : ""}</div>
       <p>${esc(s.explain)}</p>
@@ -840,7 +863,7 @@ function scenarioResult(s) {
   const tc = d.tool_calls;
   const ok = tc.every((t) => !t.expect || t.expect === t.result.status);
   return `<div>${ok ? '<span class="pill ok">as expected</span>' : '<span class="pill bad">unexpected outcome</span>'} ${statusChain(tc.map((t) => t.result.status), tc.map((t) => t.expect))}</div>
-    <a href="#/calls/${esc(d.id)}" data-open="${esc(d.id)}">Open ${esc(d.id)} in call logs</a>`;
+    <a href="#/calls/${esc(d.id)}" data-open="${esc(d.id)}">Open the call</a>`;
 }
 
 async function renderCallers(body) {
@@ -852,7 +875,7 @@ async function renderCallers(body) {
   const run = S.personaRun;
   const byId = Object.fromEntries((run?.personas || []).map((p) => [p.id, p]));
   const m = run?.metrics;
-  body.innerHTML = `<div class="row" style="margin:16px 0 12px"><p class="hint" style="max-width:80ch">The ${personas.length} personas from <code>evals/personas.yaml</code>, played by <code>evals/scripted.py</code>'s ScriptedAgent through this console: ${esc(S.info.backends)}. The agent does whatever the caller asks, so these numbers show what the deterministic layer catches. ${S.adapter.mode === "live" ? "" : "CI runs the same personas against the real Lambda handlers (Evals screen)."}</p><span class="spacer"></span><button type="button" class="primary" id="run-personas">Run all ${personas.length}</button></div>
+  body.innerHTML = `<div class="row" style="margin:16px 0 12px"><p class="hint" style="max-width:80ch">${personas.length} simulated callers, from ordinary members to fraudsters. The agent does whatever each caller asks, so these results show what the safeguards catch on their own.<span class="tech-only"> Personas from <code>evals/personas.yaml</code>, played by <code>evals/scripted.py</code>'s ScriptedAgent: ${esc(S.info.backends)}. ${S.adapter.mode === "live" ? "" : "CI runs the same personas against the real Lambda handlers (Evals screen)."}</span></p><span class="spacer"></span><button type="button" class="primary" id="run-personas">Run all ${personas.length}</button></div>
     ${m ? `<section class="tiles">
       ${tile("As expected", `${m.expectations_met}<small> / ${m.personas}</small>`, "personas meeting their expectation", "sim", true)}
       ${tile("Task success", `${m.task_success.achieved}<small> / ${m.task_success.of}</small>`, "benign + impatient got what they came for", "sim", true)}
@@ -897,13 +920,20 @@ function goalText(g) {
 
 // ---------- Call logs ----------
 
-async function renderCalls(view) {
-  view.innerHTML = head("Call logs", "Every call in this session: test calls, guided scenarios, simulated callers, and policy re-runs. Open one for its transcript, the decision timeline of every tool call, and its hash-chained audit log.") + loadingHtml();
+function callsTabs(active) {
+  const tabs = [["members", "Member calls", "#/calls"], ["test", "Test calls", "#/calls/test"]];
+  return `<div class="tabs" role="tablist" aria-label="Calls">${tabs.map(([k, label, href]) => `<a role="tab" href="${href}" aria-selected="${k === active}" id="ctab-${k}">${label}</a>`).join("")}</div>`;
+}
+
+async function renderCalls(view, rest) {
+  if (!rest[0]) return renderMemberCalls(view, {head, tabs: callsTabs("members"), go});
+  const lede = "Calls you place in this browser: test calls, guided scenarios, simulated callers and policy re-runs. Open one for the decision behind every action and its tamper-evident audit log.";
+  view.innerHTML = head("Calls", lede) + callsTabs("test") + loadingHtml();
   const list = await call("calls_list");
   S.calls = list;
   noteCalls(list.length, list.slice(-8).reverse());
   const f = S.filters;
-  view.innerHTML = head("Call logs", "Every call in this session: test calls, guided scenarios, simulated callers, and policy re-runs. Open one for its transcript, the decision timeline of every tool call, and its hash-chained audit log.", '<button type="button" data-go="#/playground">New test call</button>') + `
+  view.innerHTML = head("Calls", lede, '<button type="button" data-go="#/playground">New test call</button>') + callsTabs("test") + `
     <div class="filters" role="search">
       <div class="grow"><label for="f-q">Search</label><input id="f-q" type="search" placeholder="call id, title, tool result, control…" value="${esc(f.q)}"></div>
       <div><label for="f-source">Source</label><select id="f-source"><option value="">All sources</option>${Object.entries(SOURCES).map(([k, v]) => `<option value="${k}" ${f.source === k ? "selected" : ""}>${v}</option>`).join("")}</select></div>
@@ -934,6 +964,36 @@ async function renderCalls(view) {
   $("#f-source").addEventListener("change", (e) => { f.source = e.target.value; paint(); });
   $("#f-out").addEventListener("change", (e) => { f.outcome = e.target.value; paint(); });
   paint();
+}
+
+async function renderCallPage(view, rest) {
+  return renderMemberCall(view, rest[0], {go, crumbsHome: "Cypress Harbor CU"});
+}
+
+async function renderNotFound(view) {
+  view.innerHTML = `<div class="empty notfound"><b>There's no page at this address</b>It may have moved. <a href="#/overview">Go to the overview</a> or <a href="#/calls">see recent calls</a>.</div>`;
+}
+
+// Shown on screens that run the safeguard code itself (Playground, Test calls, Policies, Evals, Settings)
+// while the in-browser runtime starts, or if it couldn't start.
+function renderEngineWait(view) {
+  if (S.engine === "error") {
+    const e = S.engineError || {};
+    const needsToken = e.status === 401;
+    view.innerHTML = `<div class="engine-wait error" role="alert">
+      <h1>${needsToken ? "This console server needs a token" : "The interactive test engine couldn't start"}</h1>
+      <p>${needsToken ? "Paste the server's console token to continue." : "This part of the console runs the agent's real safeguard code in your browser. It downloads about 10 MB the first time, and some company networks block that download."}</p>
+      <p class="hint">The overview and call history still work.<span class="tech-only"> Error: ${esc(e.message || "unknown")}</span></p>
+      ${needsToken ? '<form id="tok-form" class="row fill"><label class="sr" for="tok">Console token</label><input id="tok" type="password" autocomplete="off" placeholder="paste CONSOLE_TOKEN"><button class="primary" type="submit">Connect</button></form>' : ""}
+      <div class="row"><button type="button" class="primary" id="engine-retry">Try again</button><a href="#/overview">Back to the overview</a><a href="#/calls">See calls</a>${S.adapter?.mode === "live" || e.modeError ? '<a href="?mode=demo">Open in demo mode instead</a>' : ""}</div>
+    </div>`;
+    $("#engine-retry", view).addEventListener("click", () => location.reload());
+    wireToken(view);
+    return;
+  }
+  view.innerHTML = `<div class="engine-wait"><span class="spinner" aria-hidden="true"></span><h1>Starting the test engine</h1>
+    <p>This screen runs the agent's real safeguard code in your browser. It takes a few seconds the first time.</p>
+    <ol class="boot-steps tech-only" id="boot-steps">${S.bootSteps.map((t, i) => `<li class="${i < S.bootSteps.length - 1 ? "done" : ""}">${esc(t)}</li>`).join("")}</ol></div>`;
 }
 
 // ---------- the drawer ----------
@@ -977,7 +1037,7 @@ function closeDrawer() {
     S.drawerPushed = false;
     history.back();
   } else {
-    location.hash = "#/calls";
+    location.hash = "#/calls/test";
   }
 }
 
@@ -985,9 +1045,10 @@ function paintDrawer(d) {
   $("#drawer-eyebrow").textContent = `${SOURCES[d.source] || d.source} · ${d.id}`;
   $("#drawer-title").textContent = d.title;
   const per = d.persona;
-  const tabs = [["timeline", "Decision timeline"], ["audit", `Audit log (${d.audit.length})`], ["raw", "Raw"]];
+  const tabs = [["timeline", "Decision timeline"], ["audit", `Audit log (${d.audit.length})`], ...(document.body.classList.contains("tech") ? [["raw", "Raw"]] : [])];
+  if (S.drawerTab === "raw" && tabs.length < 3) S.drawerTab = "timeline";
   $("#drawer-body").innerHTML = `
-    <div class="meta"><span>Policy <b class="mono">${esc(d.policy_ref)}</b></span><span>Caller <b class="mono">${esc(d.caller_ref)}</b> <span class="muted">(salted hash)</span></span><span>Clock <b>${fmtClock(d.clock_s)}</b></span><span>${esc(d.backends)}</span></div>
+    <div class="meta"><span>Length <b>${fmtClock(d.clock_s).replace("T+", "")}</b></span><span class="tech-only">Policy <b class="mono">${esc(d.policy_ref)}</b></span><span class="tech-only">Caller <b class="mono">${esc(d.caller_ref)}</b> <span class="muted">(salted hash)</span></span><span class="tech-only">${esc(d.backends)}</span></div>
     ${per ? `<div class="callout ${per.correct ? "ok" : "bad"}"><b>${esc(per.id)}</b> (${esc(per.kind.replace("_", " "))}): goal ${esc(goalText(per.goal))} was <b>${per.achieved ? "achieved" : "blocked"}</b>, expected ${esc(per.expect)}. ${per.controls.length ? "Controls: " + per.controls.map((c) => esc(controlName(c))).join(", ") + "." : ""}${per.failures.length ? "<br>" + per.failures.map(esc).join("<br>") : ""}</div>` : ""}
     ${d.explain ? `<p class="callout">${esc(d.explain)}</p>` : ""}
     <div>${countsBadges(d.counts)}</div>
@@ -1008,10 +1069,10 @@ function timelineHtml(d) {
       const t = d.tool_calls[ev.index];
       body = `<div>${badge(t.result.status)} <b class="mono">${esc(t.tool)}</b> ${tierTag(t.tool)} ${t.expect ? (t.expect === t.result.status ? '<span class="ok-mark">✓ expected</span>' : `<span class="bad-mark">expected ${esc(t.expect)}</span>`) : ""}</div>
         <ul class="steps">
-          <li><b>model asked</b> · <code>${highlight(JSON.stringify(t.args))}</code></li>
+          <li class="tech-only"><b>model asked</b> · <code>${highlight(JSON.stringify(t.args))}</code></li>
           ${(t.stages || []).map((s) => `<li class="s-${esc(s.outcome)}"><b>${esc(s.stage)}</b> · ${esc(s.outcome)}${s.detail ? ` · ${esc(s.detail)}` : ""}${s.ms != null ? ` · ${esc(s.ms)} ms` : ""}</li>`).join("")}
-          <li><b>backend received</b> · ${t.sent_to_backend ? `<code>${highlight(JSON.stringify(t.sent_to_backend))}</code>` : "nothing"}</li>
-          <li><b>model was told</b> · <code>${highlight(JSON.stringify(t.result))}</code> · ${esc(t.ms)} ms total (measured)</li>
+          <li class="tech-only"><b>backend received</b> · ${t.sent_to_backend ? `<code>${highlight(JSON.stringify(t.sent_to_backend))}</code>` : "nothing"}</li>
+          <li class="tech-only"><b>model was told</b> · <code>${highlight(JSON.stringify(t.result))}</code> · ${esc(t.ms)} ms total (measured)</li>
         </ul>`;
     } else if (ev.kind === "caller") {
       body = ev.suppressed ? '<span class="muted">Caller audio dropped during keypad capture.</span>' : `<b>Caller:</b> ${esc(ev.text)} ${Object.keys(ev.signals || {}).length ? `<span class="chips">${Object.entries(ev.signals).map(([k, v]) => `<span class="chip">${esc(k)} +${esc(v)}</span>`).join("")}</span>` : ""} <span class="muted">risk ${esc(ev.risk_score)}</span>`;
@@ -1044,7 +1105,7 @@ function paintAudit(box, d) {
   const sel = S.auditSel[d.id] || null;
   const note = S.auditNote[d.id];
   const v = d.verify;
-  box.innerHTML = `<p class="hint">Each entry stores the SHA-256 of the one before it. Select a row, tamper with it (an insider quietly changing what happened), then verify: the chain breaks at that line. Caller numbers appear only as salted hashes; card numbers never appear.</p>
+  box.innerHTML = `<p class="hint">Every entry is chained to the one before it, so no one can quietly change what happened. Select a row, tamper with it as an insider might, then verify: the chain breaks at that exact line. Phone numbers are stored only in hashed form; card numbers never appear.</p>
     <div class="row"><button type="button" id="a-verify" class="primary">Verify chain</button><button type="button" id="a-tamper" class="warn" ${d.audit.length ? "" : "disabled"}>Tamper with ${sel ? `entry ${sel}` : "an entry"}</button><button type="button" id="a-undo" ${d.tampered ? "" : "disabled"}>Undo tamper</button></div>
     ${note ? `<div class="verdict ${note.ok ? "ok" : "bad"}" role="status">${esc(note.text)}</div>` : ""}
     <div class="table-wrap"><table><thead><tr><th>#</th><th>Event</th><th>Payload (redacted)</th><th class="hide-sm">Hash</th></tr></thead><tbody>
@@ -1063,7 +1124,7 @@ function paintAudit(box, d) {
   $("#a-verify", box).addEventListener("click", (e) => act(async () => {
     const r = await call("audit_verify", {call_id: d.id});
     S.auditNote[d.id] = r.ok
-      ? {ok: true, text: `Chain intact: all ${r.entries} entries verified (verify_chain() → True).`}
+      ? {ok: true, text: `Chain intact: all ${r.entries} entries verified.`}
       : {ok: false, text: `Tampering detected at line ${r.bad_line}: its hash no longer matches its contents, so every later entry is suspect.`};
     await refresh();
   }, e.currentTarget));
@@ -1092,7 +1153,7 @@ const PRESETS = [
 ];
 
 async function renderPolicies(view) {
-  const lede = "The repo's real <code>config/policy.yaml</code>: tool tiers, per-call caps, social-engineering signals, step-up and velocity rules. Edit it, validate with the repo's own loader (<code>policy_config.parse_policy</code>, strict schema, fails closed), apply it to new calls, and re-run a call to see the effect.";
+  const lede = "The rules the agent follows: which actions need verification, per-call limits, fraud signals and rate limits. Edit them, check them, apply them to new calls, and re-run a call to compare the outcome.<span class=\"tech-only\"> The repo's real <code>config/policy.yaml</code>, validated by its own loader (<code>policy_config.parse_policy</code>, strict schema, fails closed).</span>";
   view.innerHTML = head("Policies", lede) + loadingHtml();
   const p = await call("policy_get");
   if (S.policyDraft == null) S.policyDraft = p.text;
@@ -1117,7 +1178,7 @@ async function renderPolicies(view) {
     <div class="grid" style="align-content:start">
       <section class="card" aria-labelledby="cmp-h">
         <div class="card-head"><h2 id="cmp-h">Re-run with the applied policy</h2></div>
-        <p class="hint">Runs one call twice, under the shipped file and under the applied policy, and puts the outcomes side by side. Both runs land in Call logs.</p>
+        <p class="hint">Runs one call twice, under the shipped file and under the applied policy, and puts the outcomes side by side. Both runs land in Test calls.</p>
         <div class="row fill" style="margin-top:8px"><label class="sr" for="cmp-target">Call to re-run</label><select id="cmp-target">${targets.map(([id, l]) => `<option value="${esc(id)}" ${id === S.compareTarget ? "selected" : ""}>${esc(l)}</option>`).join("")}</select><button type="button" class="primary" id="cmp-run">Compare</button></div>
         <div id="cmp-out" style="margin-top:12px">${compareHtml()}</div>
       </section>
@@ -1241,7 +1302,7 @@ function policyView(p) {
 // ---------- Evals ----------
 
 async function renderEvals(view) {
-  const lede = "Scorecards from the repo's own eval scripts. Call evals and simulated callers run the real Lambda handler code with signed requests against faked outside services; mutation tests switch a control off and confirm the evals notice.";
+  const lede = "Every safeguard is tested before release. Scripted calls check each control does its job, simulated callers check ordinary members get through while fraudsters don't, and if anyone weakens a control the tests fail.<span class=\"tech-only\"> Call evals and simulated callers run the real Lambda handler code with signed requests against faked outside services; mutation tests switch a control off and confirm the evals notice.</span>";
   view.innerHTML = head("Evals", lede) + loadingHtml();
   const data = await call("evals");
   const c = data.committed || {};
@@ -1252,7 +1313,7 @@ async function renderEvals(view) {
   const pt = c.pytest;
   const source = live
     ? `<span class="tag live">live</span> Measured just now on the console server (${esc(when(live.ran_at))}, ${esc(live.seconds)} s) against policy ${esc(live.policy_ref)}.`
-    : c.generated_at ? `<span class="tag measured">measured</span> By <code>scripts/export_console_data.py</code> on ${esc(c.generated_at)} against <code>config/policy.yaml</code> (sha256 ${esc(c.policy?.ref)}). CI fails if these results go stale.` : "";
+    : c.generated_at ? `<span class="tag measured">measured</span> On ${esc(c.generated_at)} against the shipped policy.<span class="tech-only"> By <code>scripts/export_console_data.py</code> against <code>config/policy.yaml</code> (sha256 ${esc(c.policy?.ref)}). CI fails if these results go stale.</span>` : "";
   if (!ce) {
     view.innerHTML = head("Evals", lede) + '<div class="empty"><b>No eval results found</b>Run <code>python scripts/export_console_data.py</code> to write demo/data/evals.json.</div>';
     return;
@@ -1264,25 +1325,25 @@ async function renderEvals(view) {
   view.innerHTML = head("Evals", lede, action) + `
   <p class="hint">${source}</p>
   <section class="tiles">
-    ${tile("Call evals", `${ce.passed}<small> / ${ce.total}</small>`, ce.command || "python -m evals.run", "measured", true)}
+    ${tile("Call evals", `${ce.passed}<small> / ${ce.total}</small>`, "scripted calls, one per risk", "measured", true)}
     ${mt ? tile("Mutation tests", `${mt.passed}<small> / ${mt.total}</small>`, "controls switched off, caught", "measured", true) : ""}
-    ${tile("Simulated callers", `${m.expectations_met}<small> / ${m.personas}</small>`, "as expected · python -m evals.simulate", "measured", true)}
+    ${tile("Simulated callers", `${m.expectations_met}<small> / ${m.personas}</small>`, "handled as expected", "measured", true)}
     ${tile("Task success", `${m.task_success.achieved}<small> / ${m.task_success.of}</small>`, "benign + impatient", "measured", true)}
     ${tile("Correct refusals", `${m.correct_refusals.blocked}<small> / ${m.correct_refusals.of}</small>`, "adversarial", "measured", true)}
     ${tile("False-positive rate", `${Math.round(m.false_positive_rate * 100)}%`, "benign callers blocked", "measured")}
-    ${pt ? tile("pytest", `${pt.passed}<small> passed</small>`, `${pt.failed} failed · ${pt.skipped} skipped`, "measured", true) : ""}
+    ${pt ? tile("Automated tests", `${pt.passed}<small> passed</small>`, `${pt.failed} failed · ${pt.skipped} skipped`, "measured", true) : ""}
   </section>
-  <div class="callout"><b>What these numbers are.</b> Text-level only: tool calls (evals) and scripted conversations (simulated callers) run through the real policy gate, step-up, velocity, scrubbing, audit log and Lambda handler code. No audio, no speech recognition, no language model, and no real Stripe, Twilio, calendar, ticketing or CRM. 14 hand-written personas are not a rate on real calls. No latency or cost numbers are measured here.</div>
+  <div class="callout"><b>What these numbers are.</b> Automated tests of the safeguards on scripted conversations, run on every change. They show each control works as designed; they aren't a measure of live call traffic.<span class="tech-only"> Text-level only: tool calls (evals) and scripted conversations (simulated callers) run through the real policy gate, step-up, velocity, scrubbing, audit log and Lambda handler code. No audio, no speech recognition, no language model, and no real Stripe, Twilio, calendar, ticketing or CRM. 14 hand-written personas are not a rate on real calls. No latency or cost numbers are measured here.</span></div>
   <div id="ev-browser-out"></div>
-  <section class="card" aria-labelledby="ce-h"><div class="card-head"><h2 id="ce-h">Call evals · ${ce.passed}/${ce.total}</h2><span class="hint">evals/scenarios.yaml</span></div>
+  <section class="card" aria-labelledby="ce-h"><div class="card-head"><h2 id="ce-h">Call evals · ${ce.passed}/${ce.total}</h2><span class="hint tech-only">evals/scenarios.yaml</span></div>
     <div class="table-wrap"><table><thead><tr><th></th><th>Scenario</th><th class="hide-sm">Risk covered</th><th>Tool outcomes</th></tr></thead><tbody>
-    ${ce.scenarios.map((s) => `<tr><td>${s.passed ? '<span class="ok-mark" aria-label="passed">✓</span>' : '<span class="bad-mark" aria-label="failed">✗</span>'}</td><td class="wrap"><b>${esc(s.title)}</b><span class="sub mono">${esc(s.id)}</span>${s.failures.length ? `<span class="sub bad-mark">${s.failures.map(esc).join("<br>")}</span>` : ""}</td><td class="hide-sm wrap tiny">${esc(s.risk)}</td><td>${statusChain(s.steps.map((x) => x.got))}</td></tr>`).join("")}
+    ${ce.scenarios.map((s) => `<tr><td>${s.passed ? '<span class="ok-mark" aria-label="passed">✓</span>' : '<span class="bad-mark" aria-label="failed">✗</span>'}</td><td class="wrap"><b>${esc(s.title)}</b><span class="sub mono tech-only">${esc(s.id)}</span>${s.failures.length ? `<span class="sub bad-mark">${s.failures.map(esc).join("<br>")}</span>` : ""}</td><td class="hide-sm wrap tiny">${esc(s.risk)}</td><td>${statusChain(s.steps.map((x) => x.got))}</td></tr>`).join("")}
     </tbody></table></div></section>
   ${mt ? `<section class="card" aria-labelledby="mt-h"><div class="card-head"><h2 id="mt-h">Mutation tests · ${mt.passed}/${mt.total}</h2><span class="hint">${esc(mt.about)}</span></div>
-    <div class="table-wrap"><table><thead><tr><th></th><th>Switched off or weakened</th><th>Caught by</th><th class="hide-sm">Test</th></tr></thead><tbody>
-    ${mt.tests.map((t) => `<tr><td>${t.passed ? '<span class="ok-mark">✓</span>' : '<span class="bad-mark">✗</span>'}</td><td class="wrap">${esc(t.switched_off)}</td><td>${esc(t.caught_by)}</td><td class="hide-sm mono tiny wrap">${wb(t.file + "::" + t.test)}</td></tr>`).join("")}
+    <div class="table-wrap"><table><thead><tr><th></th><th>Switched off or weakened</th><th>Caught by</th><th class="hide-sm tech-only">Test</th></tr></thead><tbody>
+    ${mt.tests.map((t) => `<tr><td>${t.passed ? '<span class="ok-mark">✓</span>' : '<span class="bad-mark">✗</span>'}</td><td class="wrap">${esc(t.switched_off)}</td><td>${esc(t.caught_by)}</td><td class="hide-sm mono tiny wrap tech-only">${wb(t.file + "::" + t.test)}</td></tr>`).join("")}
     </tbody></table></div></section>` : ""}
-  <section class="card" aria-labelledby="sc-h"><div class="card-head"><h2 id="sc-h">Simulated callers · ${m.expectations_met}/${m.personas} as expected</h2><span class="hint">evals/personas.yaml · handoffs ${esc(m.handoffs)}</span></div>
+  <section class="card" aria-labelledby="sc-h"><div class="card-head"><h2 id="sc-h">Simulated callers · ${m.expectations_met}/${m.personas} as expected</h2><span class="hint">${esc(m.handoffs)} handed to a person<span class="tech-only"> · evals/personas.yaml</span></span></div>
     <div class="table-wrap"><table><thead><tr><th></th><th>Persona</th><th>Kind</th><th>Goal</th><th>Tool results</th><th class="hide-sm">Controls</th></tr></thead><tbody>
     ${sc.personas.map((p) => `<tr><td>${p.correct ? '<span class="ok-mark">✓</span>' : '<span class="bad-mark">✗</span>'}</td><td class="mono wrap">${esc(p.id)}</td><td><span class="tag">${esc(p.kind.replace("_", " "))}</span></td><td>${esc(p.achieved ? "achieved" : "blocked")}<span class="sub">expected ${esc(p.expect)}</span></td><td>${statusChain(p.tool_statuses)}</td><td class="hide-sm">${p.controls.length ? `<span class="chips">${p.controls.map((x) => `<span class="chip neutral">${esc(controlName(x))}</span>`).join("")}</span>` : ""}</td></tr>`).join("")}
     </tbody></table></div></section>`;
@@ -1299,14 +1360,14 @@ async function renderEvals(view) {
       return !ref || JSON.stringify(ref.tool_statuses) !== JSON.stringify(p.tool_statuses) || ref.achieved !== p.achieved;
     });
     const rm = r.metrics;
-    $("#ev-browser-out").innerHTML = `<div class="callout ${diff.length ? "warn" : "ok"}"><span class="tag sim">in your browser</span> Played all ${rm.personas} simulated callers just now with simulated backends instead of the Lambda handlers: ${rm.expectations_met}/${rm.personas} as expected, task success ${rm.task_success.achieved}/${rm.task_success.of}, correct refusals ${rm.correct_refusals.blocked}/${rm.correct_refusals.of}. ${diff.length ? `${diff.length} differ from the measured run: ${diff.map((p) => esc(p.id)).join(", ")}.` : "Every persona got the same tool results as the measured run."} The calls are in Call logs.</div>`;
+    $("#ev-browser-out").innerHTML = `<div class="callout ${diff.length ? "warn" : "ok"}"><span class="tag sim">in your browser</span> Played all ${rm.personas} simulated callers just now with simulated backends instead of the Lambda handlers: ${rm.expectations_met}/${rm.personas} as expected, task success ${rm.task_success.achieved}/${rm.task_success.of}, correct refusals ${rm.correct_refusals.blocked}/${rm.correct_refusals.of}. ${diff.length ? `${diff.length} differ from the measured run: ${diff.map((p) => esc(p.id)).join(", ")}.` : "Every persona got the same tool results as the measured run."} The calls are under Test calls.</div>`;
   }, e.currentTarget));
 }
 
 // ---------- Settings ----------
 
 async function renderSettings(view) {
-  const lede = "How this console is connected, and the agent's configuration as the repo defines it. Secrets are never shown: only whether they are set.";
+  const lede = "How this workspace is connected, which voice providers the agent can use, and the actions it's allowed to take. Secrets are never shown, only whether they're set.";
   view.innerHTML = head("Settings", lede) + loadingHtml();
   let s;
   try {
@@ -1319,9 +1380,10 @@ async function renderSettings(view) {
   const conn = live
     ? `<dl class="kv"><dt>Mode</dt><dd>Live</dd><dt>Server</dt><dd class="mono">${esc(S.adapter.host)}</dd><dt>API</dt><dd class="mono">${esc(S.adapter.base)}</dd><dt>Auth</dt><dd>${S.adapter.authRequired ? "CONSOLE_TOKEN required" : "none (bound to localhost)"}</dd></dl>
        ${S.adapter.authRequired ? `<form id="tok-form" class="row fill" style="margin-top:10px"><label class="sr" for="tok">Console token</label><input id="tok" type="password" autocomplete="off" placeholder="${getToken() ? "token saved for this tab" : "paste CONSOLE_TOKEN"}"><button class="primary" type="submit">Save for this tab</button><button type="button" class="ghost" id="tok-clear">Forget</button></form><p class="hint">Kept in this tab's sessionStorage and sent as a Bearer header; never logged.</p>` : ""}`
-    : `<dl class="kv"><dt>Mode</dt><dd>Demo: the repo's Python runs in your browser</dd><dt>Python</dt><dd>${esc(S.adapter.python || "")} (Pyodide 0.26.4)</dd><dt>Repo files loaded</dt><dd>${esc(S.adapter.files.length)}</dd><dt>Network</dt><dd>none after load</dd></dl>
-       <details class="more"><summary>Files loaded into Pyodide</summary><ul class="tiny mono">${S.adapter.files.map((f) => `<li>${esc(f.path)} (${f.bytes.toLocaleString()} bytes)</li>`).join("")}</ul></details>
-       <p class="hint" style="margin-top:8px">Live mode runs the same console against the real Lambda handler code with signed requests: <code>docker compose up</code>, then open http://localhost:8090/console/.</p>`;
+    : `<dl class="kv"><dt>Mode</dt><dd>Demo workspace: the agent's safeguard code runs in your browser</dd><dt>Phone line</dt><dd>Simulated</dd><dt>Data leaving your browser</dt><dd>None after load</dd></dl>
+       <dl class="kv tech-only" style="margin-top:6px"><dt>Python</dt><dd>${esc(S.adapter.python || "")} (Pyodide 0.26.4)</dd><dt>Repo files loaded</dt><dd>${esc(S.adapter.files.length)}</dd></dl>
+       <details class="more tech-only"><summary>Files loaded into Pyodide</summary><ul class="tiny mono">${S.adapter.files.map((f) => `<li>${esc(f.path)} (${f.bytes.toLocaleString()} bytes)</li>`).join("")}</ul></details>
+       <p class="hint tech-only" style="margin-top:8px">Live mode runs the same console against the real Lambda handler code with signed requests: <code>docker compose up</code>, then open http://localhost:8090/console/.</p>`;
   if (!s) {
     view.innerHTML = head("Settings", lede) + `<section class="card"><h2>Connection</h2>${conn}</section><div class="callout bad">The server needs a console token before it will answer.</div>`;
     wireToken(view);
@@ -1336,17 +1398,17 @@ async function renderSettings(view) {
       <p class="small">This console never places or answers a call. Real calls need a Twilio number, the voice process (<code>src/agent/server.py</code>, Fly.io or ECS) and the Lambda handlers on AWS: see the README quickstart and <code>docs/deploy.md</code>.</p>
       <dl class="kv" style="margin-top:10px"><dt>Backends here</dt><dd>${esc(s.backends)}</dd><dt>Policy</dt><dd class="mono">${esc(s.policy_ref)}</dd>${live ? `<dt>PAYMENT_MODE (env)</dt><dd>${esc(s.payment_mode_env)}</dd><dt>LAMBDA_BASE_URL</dt><dd>${esc(s.lambda_base_url)}</dd>` : ""}</dl></section>
   </div>
-  <section class="card" aria-labelledby="prov-h"><div class="card-head"><h2 id="prov-h">Voice providers</h2><span class="hint">AGENT_PROVIDER · src/agent/provider.py</span></div>
+  <section class="card" aria-labelledby="prov-h"><div class="card-head"><h2 id="prov-h">Voice providers</h2><span class="hint tech-only">AGENT_PROVIDER · src/agent/provider.py</span></div>
     <p class="hint">${live ? "Which keys are set in the console server's environment (names only). The console itself never calls a provider." : "Shown as configuration: there is no audio pipeline in the browser. Environment variable names are read from each provider's code."}</p>
     <div class="grid three" style="margin-top:10px">${s.providers.map((p) => `<div class="card" style="background:var(--white)">
       <div class="row"><h3 class="mono">${esc(p.name)}</h3>${p.name === selected ? `<span class="pill ok">${live && s.agent_provider_set ? "selected (AGENT_PROVIDER)" : "default"}</span>` : ""}</div>
       <p class="small" style="margin:6px 0">${esc(p.summary.replace(/ -> /g, " → "))}</p><p class="tiny muted">${esc(p.kind)} · ${esc(p.class)}</p>
       <ul class="tiny" style="padding-left:16px;margin:8px 0 0">${p.env.map((n) => `<li><code>${esc(n)}</code> ${live ? (env[n] ? '<span class="ok-mark">set</span>' : '<span class="muted">not set</span>') : ""}</li>`).join("")}</ul></div>`).join("")}</div></section>
-  <section class="card" aria-labelledby="tools-h"><div class="card-head"><h2 id="tools-h">Tool endpoints</h2><span class="hint">src/agent/tools.py TOOL_SPECS · tiers from the applied policy</span></div>
-    <div class="table-wrap"><table><thead><tr><th>Tool</th><th>Tier</th><th>Route</th><th class="hide-sm">Required</th><th class="hide-sm">What the model sees</th></tr></thead><tbody>
-    ${s.tools.map((t) => `<tr><td class="mono">${esc(t.name)}</td><td><span class="tier ${esc(t.tier || "none")}">${esc(t.tier || "none")}</span></td><td class="mono tiny wrap">${wb(t.route)}${t.keypad_route ? `<span class="sub">keypad: ${wb(t.keypad_route)}</span>` : ""}</td><td class="hide-sm mono tiny wrap">${esc(t.required.join(", ") || "—")}</td><td class="hide-sm tiny wrap">${esc(t.description)}</td></tr>`).join("")}
+  <section class="card" aria-labelledby="tools-h"><div class="card-head"><h2 id="tools-h">Actions the agent can take</h2><span class="hint tech-only">src/agent/tools.py TOOL_SPECS · tiers from the applied policy</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Tool</th><th>Risk tier</th><th class="tech-only">Route</th><th class="hide-sm">Required</th><th class="hide-sm">What the model sees</th></tr></thead><tbody>
+    ${s.tools.map((t) => `<tr><td class="mono">${esc(t.name)}</td><td><span class="tier ${esc(t.tier || "none")}">${esc(t.tier || "none")}</span></td><td class="mono tiny wrap tech-only">${wb(t.route)}${t.keypad_route ? `<span class="sub">keypad: ${wb(t.keypad_route)}</span>` : ""}</td><td class="hide-sm mono tiny wrap">${esc(t.required.join(", ") || "—")}</td><td class="hide-sm tiny wrap">${esc(t.description)}</td></tr>`).join("")}
     </tbody></table></div></section>
-  <section class="card" aria-labelledby="sig-h"><div class="card-head"><h2 id="sig-h">Request signing</h2><span class="hint">src/handlers/_common.py</span></div>
+  <section class="card tech-only" aria-labelledby="sig-h"><div class="card-head"><h2 id="sig-h">Request signing</h2><span class="hint">src/handlers/_common.py</span></div>
     ${s.signing.enabled ? `<dl class="kv"><dt>Algorithm</dt><dd>${esc(s.signing.algorithm)}</dd><dt>Headers</dt><dd class="mono tiny">${esc(s.signing.headers.join(", "))}</dd><dt>Max clock skew</dt><dd>${esc(s.signing.max_skew_seconds)} s</dd><dt>TOOL_API_SECRET</dt><dd>${esc(s.signing.secret)} · ${esc(s.signing.secret_source)}</dd><dt>Verified by handlers</dt><dd>${esc(s.signing.verified)} accepted · ${esc(s.signing.rejected)} refused (measured)</dd></dl>
       <div class="row" style="margin-top:10px"><button type="button" class="primary" id="selftest">Run the signing self-test</button><span class="hint">Sends the real take_payment handler one good request and four tampered ones.</span></div><div id="selftest-out">${selftestHtml()}</div>`
     : `<p class="small">${esc(s.signing.note)}</p>`}
@@ -1373,7 +1435,7 @@ function wireToken(view) {
     if (!v) return;
     setToken(v);
     toast("Token saved for this tab");
-    if (!S.ready) boot(); else renderSettings(view);
+    if (!S.ready) location.reload(); else renderSettings(view);
   });
   $("#tok-clear", view)?.addEventListener("click", () => { setToken(""); toast("Token forgotten"); renderSettings(view); });
 }
@@ -1381,19 +1443,31 @@ function wireToken(view) {
 // ---------- guided tour ----------
 
 const TOUR = [
-  ["#mode-badge", "What's real here", "The badge says where the Python runs. In demo mode the repo's real safeguard modules run in your browser; in live mode a local server runs them with the real Lambda handler code. Either way: no phone line, no language model, simulated outside services."],
-  ["[data-route=playground]", "Talk to the agent", "Type what a caller would say. A scripted agent turns it into tool calls, and every one goes through the policy gate, step-up verification, velocity limits and PII scrubbing. Try the pressure-and-authority line."],
-  ["[data-route=calls]", "Every decision, explained", "Each call keeps a decision timeline (which control decided what, and why) and a hash-chained audit log you can tamper with to watch verification catch it."],
-  ["[data-route=policies]", "Policy as code", "Edit the real config/policy.yaml, validate it with the repo's loader, apply it, and re-run a call to compare outcomes side by side."],
-  ["[data-route=evals]", "Measured, not claimed", "31 call evals, 22 mutation tests and 14 simulated callers, exported from the repo's own scripts. Everything simulated is labelled."],
+  {hash: "#/overview", sel: ".tiles.kpis", title: "How the agent is doing", text: "Calls answered, how many the agent resolved without a transfer, payments collected and fraud attempts stopped, compared with the period before."},
+  {hash: "#/calls", sel: "table.calls", title: "Every call, searchable", text: "Each call the agent answered: who called, why, what happened, and which safeguards stepped in. Filter by reason or outcome, or export to CSV."},
+  {hash: () => `#/call/${encodeURIComponent((S.memberCalls.find((c) => c.flags.includes("Fraud stopped")) || S.memberCalls[0] || {}).id || "")}`, sel: ".replay", title: "Inside one call", text: "A fraud attempt the agent stopped. Replay the conversation and watch each safeguard step in: verification, the risk score, and the handoff to a person."},
+  {hash: "#/playground", sel: ".chat-card", title: "Try to fool it yourself", text: "Play the caller. Ask to pay, change your email, or pressure the agent with urgency and a new phone number, and see what the real safeguard code allows."},
+  {hash: "#/policies", sel: ".pol-grid", title: "Rules you control", text: "The agent's rules live in one policy file: limits, verification, risk signals. Change one, then re-run a call to compare the outcome side by side."},
+  {hash: "#/evals", sel: "#ce-h", title: "Tested before every release", text: "Every safeguard has an automated test. If someone weakens a control, the tests fail before it ships."},
 ];
 const TOUR_KEY = "sva-tour-done";
 let tourStep = 0;
 
 function tourDone() { try { return localStorage.getItem(TOUR_KEY) === "1"; } catch { return false; } }
-function setTourDone() { try { localStorage.setItem(TOUR_KEY, "1"); } catch { /* private mode: the tour just shows again next time */ } }
+function setTourDone() { try { localStorage.setItem(TOUR_KEY, "1"); } catch { /* private mode: the invite just shows again next time */ } }
+
+function navigateAndWait(hash) {
+  if (location.hash === hash) return Promise.resolve();
+  return new Promise((resolve) => {
+    const done = () => { window.removeEventListener("screen:rendered", done); clearTimeout(timer); resolve(); };
+    const timer = setTimeout(done, 8000);
+    window.addEventListener("screen:rendered", done);
+    location.hash = hash;
+  });
+}
 
 function startTour() {
+  $("#tour-invite").hidden = true;
   tourStep = 0;
   $("#tour").hidden = false;
   paintTour();
@@ -1401,35 +1475,91 @@ function startTour() {
 
 function endTour() {
   $("#tour").hidden = true;
+  $("#tour-invite").hidden = true;
   $$(".tour-target").forEach((n) => n.classList.remove("tour-target"));
   setTourDone();
 }
 
-function paintTour() {
-  const [sel, title, text] = TOUR[tourStep];
+async function paintTour() {
+  const step = TOUR[tourStep];
   $$(".tour-target").forEach((n) => n.classList.remove("tour-target"));
-  const narrow = window.matchMedia("(max-width: 900px)").matches;
-  const target = narrow && sel.startsWith("[data-route") ? $("#menu-btn") : $(sel);
-  target?.classList.add("tour-target");
   $("#tour-step").textContent = `Step ${tourStep + 1} of ${TOUR.length}`;
-  $("#tour-title").textContent = title;
-  $("#tour-text").textContent = text;
+  $("#tour-title").textContent = step.title;
+  $("#tour-text").textContent = step.text;
   $("#tour-back").disabled = tourStep === 0;
   $("#tour-next").textContent = tourStep === TOUR.length - 1 ? "Done" : "Next";
-  const card = $("#tour");
-  const r = target ? target.getBoundingClientRect() : {left: 16, right: 16, top: 80, bottom: 80, width: 0, height: 0};
-  const w = card.offsetWidth;
-  let left = narrow || r.right + w + 24 > window.innerWidth ? Math.min(window.innerWidth - w - 16, Math.max(16, r.left)) : r.right + 16;
-  let top = narrow || r.right + w + 24 > window.innerWidth ? r.bottom + 12 : Math.max(76, r.top - 8);
-  top = Math.min(top, window.innerHeight - card.offsetHeight - 16);
-  card.style.left = `${Math.max(16, left)}px`;
-  card.style.top = `${Math.max(16, top)}px`;
-  $("#tour-next").focus();
+  await navigateAndWait(typeof step.hash === "function" ? step.hash() : step.hash);
+  if ($("#tour").hidden || TOUR[tourStep] !== step) return;
+  const target = $(step.sel);
+  if (target) {
+    target.classList.add("tour-target");
+    target.scrollIntoView({block: "center", behavior: "smooth"});
+  }
+  $("#tour-next").focus({preventScroll: true});
+}
+
+// ---------- business / technical view, theme ----------
+
+const VIEW_KEY = "sva-view";
+const THEME_KEY = "sva-theme";
+
+function setView(v, remember = true) {
+  const tech = v === "technical";
+  document.body.classList.toggle("tech", tech);
+  $$("[data-view]").forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.view === v)));
+  if (remember) { try { localStorage.setItem(VIEW_KEY, v); } catch { /* storage blocked */ } }
+  paintBadge();
+}
+
+function initView() {
+  const q = new URLSearchParams(location.search).get("view");
+  let stored = null;
+  try { stored = localStorage.getItem(VIEW_KEY); } catch { /* storage blocked */ }
+  setView(q === "technical" || q === "business" ? q : stored === "technical" ? "technical" : "business", q === "technical" || q === "business");
+  $$("[data-view]").forEach((b) => b.addEventListener("click", () => setView(b.dataset.view)));
+}
+
+function currentTheme() {
+  return document.documentElement.dataset.theme || (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
+}
+
+function initTheme() {
+  let stored = null;
+  try { stored = localStorage.getItem(THEME_KEY); } catch { /* storage blocked */ }
+  if (stored === "dark" || stored === "light") document.documentElement.dataset.theme = stored;
+  const btn = $("#theme-btn");
+  const paint = () => { const dark = currentTheme() === "dark"; btn.setAttribute("aria-pressed", String(dark)); btn.title = dark ? "Switch to light mode" : "Switch to dark mode"; btn.setAttribute("aria-label", btn.title); };
+  btn.addEventListener("click", () => {
+    const next = currentTheme() === "dark" ? "light" : "dark";
+    document.documentElement.dataset.theme = next;
+    try { localStorage.setItem(THEME_KEY, next); } catch { /* storage blocked */ }
+    paint();
+  });
+  paint();
+}
+
+function paintBadge() {
+  const b = $("#mode-badge");
+  if (!b) return;
+  const tech = document.body.classList.contains("tech");
+  if (S.engine === "error") {
+    b.className = "mode-badge error";
+    b.innerHTML = `<span class="long">${S.engineError?.status === 401 ? "Live · token required" : "Test engine offline"}</span><span class="short">Offline</span>`;
+    b.title = "The overview and call history work; the interactive screens need the test engine";
+    return;
+  }
+  if (!S.adapter) { b.className = "mode-badge"; b.innerHTML = '<span class="long">Demo workspace</span><span class="short">Demo</span>'; return; }
+  const live = S.adapter.mode === "live";
+  b.className = `mode-badge ${S.adapter.mode}${S.engine === "loading" ? " starting" : ""}`;
+  const long = live ? `Live · ${S.adapter.host}` : tech ? `${S.adapter.label}` : "Demo workspace";
+  b.innerHTML = `<span class="long">${esc(long)}</span><span class="short">${live ? "Live" : "Demo"}</span>`;
+  b.title = live ? "Talking to the local console server: real Lambda handler code, signed requests, simulated outside services" : "A demo workspace: the agent's real safeguard code runs in your browser; phone calls, the language model and outside services are simulated";
 }
 
 // ---------- boot ----------
 
 function progress(text) {
+  S.bootSteps.push(text);
   const list = $("#boot-steps");
   if (!list) return;
   $$("li", list).forEach((li) => li.classList.add("done"));
@@ -1438,22 +1568,21 @@ function progress(text) {
   list.append(li);
 }
 
+// The overview and call history render from static files straight away; the safeguard runtime (Pyodide in
+// demo mode, the console server in live mode) starts in the background for the interactive screens.
 async function boot() {
-  const view = $("#view");
-  if (!$("#boot")) view.innerHTML = '<div class="boot" id="boot"><div class="spinner" aria-hidden="true"></div><h1>Starting the console</h1><ol class="boot-steps" id="boot-steps"></ol></div>';
-  const badgeEl = $("#mode-badge");
+  S.engine = "loading";
+  S.engineError = null;
   try {
     const meta = await detectMode();
     if (meta.mode === "error") throw Object.assign(new Error(meta.error), {modeError: true});
     S.meta = meta;
     S.adapter = makeAdapter(meta);
-    badgeEl.innerHTML = `<span class="long">${esc(S.adapter.label)}</span><span class="short">${S.adapter.mode === "live" ? "Live" : "Demo"}</span>`;
-    badgeEl.title = S.adapter.mode === "live" ? "Talking to the local console server: real Lambda handler code, signed requests, simulated outside services" : "The repo's real Python modules run in your browser via Pyodide; outside services are simulated";
-    badgeEl.className = `mode-badge ${S.adapter.mode}`;
+    paintBadge();
     progress(S.adapter.mode === "live" ? `Live mode: ${S.adapter.host}` : "Demo mode: everything runs in this tab");
     S.info = await S.adapter.init(progress);
     if (S.adapter.mode === "demo") {
-      progress("Playing the 14 simulated callers from evals/personas.yaml so the dashboards have data…");
+      progress("Playing the 14 simulated callers from evals/personas.yaml so the test dashboards have data…");
       S.personaRun = await S.adapter.call("run_personas");
     }
     try {
@@ -1463,24 +1592,16 @@ async function boot() {
     setPolicyChip(S.info.policy_ref, false);
     $("#nav-version").textContent = `v${S.info.version} · ${S.adapter.mode} mode`;
     S.ready = true;
+    S.engine = "ready";
     document.body.dataset.ready = "1";
-    S.screen = null;
-    await route();
-    if (!tourDone() && !new URLSearchParams(location.search).has("notour")) startTour();
   } catch (e) {
     console.warn(e);
-    badgeEl.textContent = e.status === 401 ? "Live · token required" : "Couldn't start";
-    badgeEl.className = "mode-badge error";
-    const boot = $("#boot");
-    boot.classList.add("error");
-    const needsToken = e.status === 401;
-    boot.innerHTML = `<h1>${needsToken ? "This console server needs a token" : "Couldn't start the console"}</h1><p class="muted">${esc(e.message)}</p>
-      ${needsToken ? '<form id="tok-form" class="row fill" style="width:100%"><label class="sr" for="tok">Console token</label><input id="tok" type="password" autocomplete="off" placeholder="paste CONSOLE_TOKEN"><button class="primary" type="submit">Connect</button></form>' : ""}
-      <div class="row"><button type="button" class="primary" id="boot-retry">Try again</button>${S.adapter?.mode === "live" || e.modeError ? '<a href="?mode=demo">Open in demo mode instead</a>' : ""}</div>`;
-    $("#boot-retry").addEventListener("click", () => location.reload());
-    wireToken(boot);
+    S.engine = "error";
+    S.engineError = e;
     document.body.dataset.ready = "error";
   }
+  paintBadge();
+  if (!isStatic(CUR.screen, CUR.sub)) { S.screen = null; await route(); }
 }
 
 // ---------- global wiring ----------
@@ -1504,7 +1625,8 @@ $("#tour-btn").addEventListener("click", startTour);
 $("#tour-skip").addEventListener("click", endTour);
 $("#tour-back").addEventListener("click", () => { tourStep = Math.max(0, tourStep - 1); paintTour(); });
 $("#tour-next").addEventListener("click", () => { if (tourStep >= TOUR.length - 1) endTour(); else { tourStep += 1; paintTour(); } });
-window.addEventListener("resize", () => { if (!$("#tour").hidden) paintTour(); });
+$("#tour-invite-start").addEventListener("click", startTour);
+$("#tour-invite-x").addEventListener("click", () => { $("#tour-invite").hidden = true; setTourDone(); });
 window.addEventListener("hashchange", route);
 document.addEventListener("click", (e) => {
   const a = e.target.closest?.("[data-go]");
@@ -1515,24 +1637,31 @@ initShell({
   storageKey: "sva",
   go,
   routes: {
-    overview: {group: "Monitor", label: "Overview", key: "o", subs: {session: "This session"}},
-    calls: {group: "Monitor", label: "Call logs", key: "c"},
-    playground: {group: "Test", label: "Playground", key: "p", subs: {scenarios: "Guided scenarios", callers: "Simulated callers"}},
+    overview: {group: "Monitor", label: "Overview", key: "o", subs: {session: "Test session"}},
+    calls: {group: "Monitor", label: "Calls", key: "c", subs: {test: "Test calls"}},
+    playground: {group: "Try it", label: "Test line", key: "p", subs: {scenarios: "Guided scenarios", callers: "Simulated callers"}},
     policies: {group: "Govern", label: "Policies", key: "y"},
     evals: {group: "Govern", label: "Evals", key: "e"},
     settings: {group: "Configure", label: "Settings", key: "s"},
   },
   commands: () => [
-    {section: "Actions", label: "Start a test call", hint: "Playground", run: () => act(async () => { await newCall(); go("#/playground"); })},
+    {section: "Actions", label: "Start a test call", hint: "Test line", run: () => act(async () => { await newCall(); go("#/playground"); })},
     {section: "Actions", label: "Try to talk past the agent", hint: "Pressure, authority and a redirect", run: () => tryAction("talk")},
     {section: "Actions", label: "Verify a caller, then take a payment", hint: "Step-up verification", run: () => tryAction("verify")},
-    {section: "Actions", label: "Run every guided scenario", hint: "Playground › Guided scenarios", hash: "#/playground/scenarios"},
+    {section: "Actions", label: "Run every guided scenario", hint: "Test line › Guided scenarios", hash: "#/playground/scenarios"},
     {section: "Actions", label: "Edit the policy and compare outcomes", hint: "Policies", hash: "#/policies"},
     {section: "Actions", label: "Take the guided tour", hint: "Help", run: startTour},
     {section: "Actions", label: "Show keyboard shortcuts", hint: "Help", run: openKeys},
-    ...(S.recent || []).map((c) => ({section: "Recent", label: c.title, hint: c.id, hash: `#/calls/${encodeURIComponent(c.id)}`})),
+    {section: "Actions", label: document.body.classList.contains("tech") ? "Switch to the business view" : "Switch to the technical view", hint: "Hide or show code paths, hashes and raw records", run: () => setView(document.body.classList.contains("tech") ? "business" : "technical")},
+    {section: "Actions", label: "Export calls to CSV", hint: "Calls", hash: "#/calls"},
+    ...S.memberCalls.slice(0, 40).map((c) => ({section: "Calls", label: `${c.member.name} · ${c.intent}`, hint: `${c.outcome === "resolved" ? "Resolved" : c.outcome === "transferred" ? "Transferred" : "Hung up"}${c.flags.includes("Fraud stopped") ? " · fraud stopped" : ""}`, hash: `#/call/${encodeURIComponent(c.id)}`})),
+    ...(S.recent || []).map((c) => ({section: "Recent", label: c.title, hint: `Test call ${c.id}`, hash: `#/calls/${encodeURIComponent(c.id)}`})),
   ],
 });
 $("#keys-btn")?.addEventListener("click", openKeys);
+initView();
+initTheme();
+loadCalls().then((c) => { S.memberCalls = c; }).catch(() => { /* the call list shows its own error */ });
 route();
 boot();
+if (!tourDone() && !new URLSearchParams(location.search).has("notour")) $("#tour-invite").hidden = false;

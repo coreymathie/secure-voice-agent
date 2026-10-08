@@ -16,8 +16,14 @@ The model, in short:
   peak, light weekends, and payday spikes on the 1st and 15th.
 - The agent answers every call first. Calls it can't finish go to member services; containment
   improves over the period as intents are tuned (a typical post-launch curve).
+- Day-to-day volume drifts (a slow random walk) on top of the weekly shape, with three events: a
+  card-processor outage on September 18 (declined cards flood the line and more calls transfer),
+  a tropical-storm watch on September 29-30, and Labor Day.
 - Fraud pressure is a steady background rate plus one SIM-swap campaign in late August.
 - Cost avoided uses stated per-call cost assumptions, which the Business view shows next to it.
+
+It also writes demo/data/sample_calls.json: the most recent calls on the last day, each with a
+member, intent, outcome, transcript and the safeguards it went through (scripts/sample_calls.py).
 """
 
 from __future__ import annotations
@@ -27,14 +33,24 @@ import json
 import math
 import random
 import sys
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
+
+try:
+    from scripts import sample_calls
+except ImportError:  # run as python scripts/generate_sample_company.py
+    import sample_calls
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "demo" / "data" / "sample_company.json"
+CALLS_OUT = ROOT / "demo" / "data" / "sample_calls.json"
 SEED = 20261007
 END = date(2026, 10, 7)
 DAYS = 90
+RECENT_CALLS = 320
+LAST_CALL = datetime(2026, 10, 7, 15, 42, 17)
+OUTAGE = date(2026, 9, 18)
+STORM = (date(2026, 9, 29), date(2026, 9, 30))
 
 COMPANY = {
     "name": "Cypress Harbor Credit Union",
@@ -96,16 +112,22 @@ ASSUMPTIONS = {
 }
 
 
-def _day(rng: random.Random, d: date, i: int) -> dict:
+def _day(rng: random.Random, d: date, i: int, drift: float) -> dict:
     weekday = d.weekday()
-    base = 1020 * [1.22, 1.05, 1.0, 0.98, 1.03, 0.52, 0.31][weekday]
+    base = 1020 * drift * [1.22, 1.05, 1.0, 0.98, 1.03, 0.52, 0.31][weekday]
     if d.day in (1, 2, 15, 16):
         base *= 1.18  # paydays and loan due dates
     if d == date(2026, 9, 7):
         base *= 0.45  # Labor Day: branches closed, the agent still answers
-    calls = int(base * rng.uniform(0.93, 1.07))
+    if d == OUTAGE:
+        base *= 1.41  # card-processor outage: members call about declined cards
+    if d in STORM:
+        base *= 1.24 if d == STORM[0] else 1.12  # storm watch: branch closures, payment deferrals
+    calls = int(base * rng.uniform(0.9, 1.1))
     progress = i / (DAYS - 1)
-    containment = 0.58 + 0.10 * (1 - math.exp(-3.2 * progress)) + rng.uniform(-0.012, 0.012)
+    containment = 0.58 + 0.10 * (1 - math.exp(-3.2 * progress)) + rng.uniform(-0.02, 0.02)
+    if d == OUTAGE:
+        containment -= 0.11
     abandoned = int(calls * rng.uniform(0.012, 0.022))
     contained = int((calls - abandoned) * containment)
     transferred = calls - abandoned - contained
@@ -145,7 +167,10 @@ def _day(rng: random.Random, d: date, i: int) -> dict:
 def build() -> dict:
     rng = random.Random(SEED)
     start = END - timedelta(days=DAYS - 1)
-    days = [_day(rng, start + timedelta(days=i), i) for i in range(DAYS)]
+    days, drift = [], 1.0
+    for i in range(DAYS):
+        drift = min(1.12, max(0.9, drift + rng.gauss(0, 0.018)))
+        days.append(_day(rng, start + timedelta(days=i), i, drift))
     total = sum(d["calls"] for d in days[-30:])
     intents = []
     for name, share, cont, tool in INTENTS:
@@ -167,6 +192,12 @@ def build() -> dict:
     ]
     notable = [
         {
+            "date": "2026-10-07",
+            "kind": "ops",
+            "title": "Spanish-language calls: 16% of today's volume",
+            "detail": "Calls in Spanish are answered in Spanish end to end; transfers go to the bilingual queue.",
+        },
+        {
             "date": "2026-10-06",
             "kind": "fraud",
             "title": "Account takeover pattern stopped",
@@ -180,6 +211,20 @@ def build() -> dict:
             "detail": "Loan-payment and branch-hours intents tuned in the September policy review.",
         },
         {
+            "date": "2026-09-29",
+            "kind": "ops",
+            "title": "Tropical storm watch: 24% more calls, no added wait",
+            "detail": "Branch-closure and payment-deferral questions spiked. The agent answered every call; hardship "
+            "requests went to member services with the context attached.",
+        },
+        {
+            "date": "2026-09-18",
+            "kind": "ops",
+            "title": "Card processor outage: declined-card calls absorbed",
+            "detail": "A 3-hour outage at the card processor sent volume up 41%. The agent explained the outage and "
+            "transferred only members with urgent needs.",
+        },
+        {
             "date": "2026-09-30",
             "kind": "compliance",
             "title": "Quarterly audit-log verification: 100% intact",
@@ -191,6 +236,13 @@ def build() -> dict:
             "title": "SIM-swap campaign: 41 contact changes held",
             "detail": "Carrier risk signals flagged a wave of ported numbers. Step-up refused codes to swapped "
             "phones and handed callers to a person; no account changes went through.",
+        },
+        {
+            "date": "2026-08-19",
+            "kind": "compliance",
+            "title": "Card number spoken on a call: scrubbed before storage",
+            "detail": "A member read a full card number during a dispute. It was removed from the transcript, the "
+            "case and the CRM note before anything was saved.",
         },
         {
             "date": "2026-08-12",
@@ -218,8 +270,25 @@ def build() -> dict:
             "audit_chains_verified_rate": 1.0,
             "card_numbers_spoken_to_agent": 0,
         },
-        "notable": notable,
+        "notable": sorted(notable, key=lambda n: n["date"], reverse=True),
+        "recent_calls": {"file": "sample_calls.json", "count": RECENT_CALLS, "through": LAST_CALL.isoformat()},
     }
+
+
+def build_calls() -> dict:
+    rng = random.Random(SEED + 1)
+    calls = sample_calls.build_calls(rng, END, RECENT_CALLS, LAST_CALL)
+    return {
+        "generated_by": "scripts/generate_sample_company.py (scripts/sample_calls.py)",
+        "seed": SEED + 1,
+        "disclaimer": "Fictional members and calls. Generated for demonstration; no real person or account.",
+        "day": END.isoformat(),
+        "calls": calls,
+    }
+
+
+def render_calls(data: dict) -> str:
+    return json.dumps(data, separators=(",", ":"), ensure_ascii=False) + "\n"
 
 
 def render(data: dict) -> str:
@@ -230,14 +299,17 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--check", action="store_true", help="exit 1 if the committed file is stale")
     args = ap.parse_args(argv)
-    text = render(build())
+    outputs = [(OUT, render(build())), (CALLS_OUT, render_calls(build_calls()))]
     if args.check:
-        if not OUT.exists() or OUT.read_text() != text:
-            print(f"{OUT.relative_to(ROOT)} is stale: run python scripts/generate_sample_company.py")
-            return 1
-        print(f"{OUT.relative_to(ROOT)} is current")
-        return 0
-    OUT.write_text(text)
+        stale = [p for p, text in outputs if not p.exists() or p.read_text(encoding="utf-8") != text]
+        for p in stale:
+            print(f"{p.relative_to(ROOT)} is stale: run python scripts/generate_sample_company.py")
+        if not stale:
+            print("demo/data/sample_company.json and sample_calls.json are current")
+        return 1 if stale else 0
+    for p, text in outputs:
+        p.write_text(text, encoding="utf-8")
+    text = outputs[0][1]
     d = json.loads(text)["days"][-30:]
     print(f"wrote {OUT.relative_to(ROOT)}: {sum(x['calls'] for x in d):,} calls in the last 30 days")
     return 0
