@@ -23,6 +23,8 @@ jobs:
       - run: pytest -q
       - name: Console eval data is current (demo/data/evals.json)
         run: python scripts/export_console_data.py --check
+      - name: Console sample-company data is current (demo/data/sample_company.json)
+        run: python scripts/generate_sample_company.py --check
       - name: Call evals (scorecard in the job summary)
         run: python -m evals.run --json eval-results.json
       - name: Simulated callers (scorecard in the job summary)

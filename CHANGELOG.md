@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+The console opens on a business. 414 tests, 31 call evals, 22 mutation tests, 14 simulated callers, and a 108-check browser smoke test across both console modes.
+
+### Console
+- **Business impact view** for a sample company, Cypress Harbor Credit Union (fictional: 92,400 members, $1.4B in assets, 11 branches). Over 7, 30 or 90 days: calls answered, resolved without a transfer, average call length, payments collected, fraud attempts stopped, verified-before-money-moved rate, member satisfaction and cost avoided (with its per-call cost assumptions shown), each against the previous period, with trend lines; daily volume by outcome; call reasons and how often each is resolved; fraud attempts by type; transfer reasons; compliance checks; recent activity. The previous Overview is now **Overview › This session**.
+- **Navigation**: screens grouped by job (Monitor, Test, Govern, Configure) with sub-pages in the sidebar, breadcrumbs, a command palette (Ctrl/Cmd+K or `/`) over screens, actions and recent calls, `g` + letter shortcuts with a `?` sheet, a call-count badge, a workspace label for the sample company, and a collapsible sidebar (`demo/shell.js`).
+- New charts in `demo/charts.js`: stacked daily columns (tooltip and table view on every mark) and KPI sparklines.
+
+### Data
+- `scripts/generate_sample_company.py` writes `demo/data/sample_company.json` from a fixed seed and stated assumptions; CI checks it's current, and `tests/test_sample_company.py` checks that daily outcomes add up and that the file is labelled fictional. Sample numbers are labelled **Sample** on every card, apart from **Measured** eval results and **Simulated** session calls.
+- Simulated callers, guided scenarios, eval scenario fixtures and playground prompts now use the credit-union setting (loan payments, card disputes, loan-officer appointments, a payment due today). The wording that drives each risk signal is unchanged, and every eval, persona and mutation result is identical to 0.7.0. `benign-flooded-basement` is now `benign-payment-due-today`. The demo's call-start disclosure names the sample credit union.
+
+### Fixed
+- `tests/test_call_limits.py::test_silent_call_is_ended_gracefully_and_audited` was timing-sensitive (a late poll could skip the idle prompt); the idle timeout in the test now leaves several polls after the prompt.
+
 ## [0.7.0] — 2026-10
 
 The single-page safeguard simulator becomes a product console, and the repo is renamed. 410 tests (up from 380), 31 call evals, 22 mutation tests, 14 simulated callers, and a 91-check browser smoke test across both console modes.

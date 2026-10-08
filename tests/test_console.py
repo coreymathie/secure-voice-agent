@@ -56,7 +56,7 @@ def _statuses(d):
 
 def test_playground_payment_goes_through_step_up(console):
     cid = console.new_call({"state": "TX"})["id"]
-    d = console.say(cid, "Hi, I'd like to pay my invoice for the furnace tune-up, it's $180. Email lee@example.com")
+    d = console.say(cid, "Hi, I'd like to make my personal loan payment, it's $180. Email lee@example.com")
     assert _statuses(d) == ["step_up_required", "code_sent"]
     code = d["phone"]["messages"][-1]["code"]
     assert d["phone"]["messages"][-1]["to"] == demo.DEMO_PHONE_ON_FILE  # not the caller ID
@@ -90,7 +90,7 @@ def test_playground_scrubs_a_card_number_and_denies_an_invented_tool(console):
 
 def test_proposals_wait_when_auto_run_is_off(console):
     cid = console.new_call({"start_verified": True})["id"]
-    d = console.say(cid, "Book me an estimate Tuesday at 2pm. It's Dana, dana@example.com", auto_run=False)
+    d = console.say(cid, "Book me with a loan officer Tuesday at 2pm. It's Dana, dana@example.com", auto_run=False)
     assert d["tool_calls"] == [] and d["pending"][0]["tool"] == "book_meeting"
     assert d["pending"][0]["args"]["start_iso"] == "2026-10-06T14:00:00"
     edited = {**d["pending"][0]["args"], "start_iso": "2026-10-07T09:00:00"}
@@ -147,7 +147,7 @@ def test_applying_a_policy_changes_new_calls_and_compare_shows_it(console):
     weak = POLICY.replace("  threshold: 4", "  threshold: 1", 1)
     applied = console.policy_apply(weak)
     assert applied["applied_ok"] and applied["modified"]
-    cmp = console.policy_compare("benign-flooded-basement")
+    cmp = console.policy_compare("benign-payment-due-today")
     assert cmp["shipped"]["persona"]["achieved"] and not cmp["applied"]["persona"]["achieved"]
     assert cmp["same"] is False and console.policy_text == weak
     rejected = console.policy_apply("version: 2")

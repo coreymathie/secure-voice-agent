@@ -18,12 +18,17 @@ Neither mode places or answers a phone call, and neither uses a language model. 
 
 ## Screens
 
-- **Overview**: session totals counted from the calls' audit logs (tool calls allowed, blocked, stepped up, handed off; payments by link vs keypad; intact audit chains), the measured eval results, two charts (decisions by tool; controls that fired), and "what to try" cards. On load the 14 simulated callers are played so the dashboards have data; everything there is labelled simulated.
+- **Overview › Business impact**: 90 days of contact-center activity for Cypress Harbor Credit Union, a fictional credit union, from `demo/data/sample_company.json` (written by `python scripts/generate_sample_company.py`, a seeded generator; CI runs it with `--check`). KPI tiles compare the chosen 7/30/90-day range with the period before it; cost avoided multiplies calls resolved by the agent by the per-call cost assumptions stored in the file and shown on screen. Every card is labelled sample, and the banner links to the measured results (Evals) and the simulated session (This session). Both modes load the same static file.
+- **Overview › This session**: session totals counted from the calls' audit logs (tool calls allowed, blocked, stepped up, handed off; payments by link vs keypad; intact audit chains), the measured eval results, two charts (decisions by tool; controls that fired), and "what to try" cards. On load the 14 simulated callers are played so the dashboards have data; everything there is labelled simulated.
 - **Playground**: a test call. Pick the caller's state, the consent mode and key pressed, `PAYMENT_MODE`, a SIM-swap signal, then talk. Each tool call shows its path through the policy gate, velocity, PII scrubbing, request signing (live), and the handler. The simulated phone on file receives one-time codes; keypad mode shows the `<Pay>` TwiML and lets you play Twilio's result. You can also review and edit each proposed tool call before it runs, or act as the model and call any tool directly. Tabs for the 12 guided scenarios and the 14 simulated callers.
 - **Call logs**: every call, with search and filters. The drawer shows the decision timeline (each stage's decision and reason, what the model asked for, what the backend received, what the model was told, measured handler time) and the hash-chained audit log, where you can tamper with an entry and watch `verify_chain()` find it.
 - **Policies**: edit `config/policy.yaml`, validate it with `policy_config.parse_policy` (the loader the voice process uses at startup), apply it to new calls, and re-run a scenario or simulated caller under the shipped and the applied policy side by side. Errors show inline by field path; an invalid file is never applied.
 - **Evals**: the 31 call evals, the 22 mutation tests, the simulated-caller scorecard, and the pytest totals.
 - **Settings**: connection and console token (live), voice providers with the environment variables each one reads (live: set or not, never values), tool endpoints, and request signing with a self-test (live).
+
+## Navigation
+
+`demo/shell.js` holds the console shell, shared in design with the other consoles in this portfolio: screens grouped by job (Monitor, Test, Govern, Configure) with sub-pages listed under their parent, breadcrumbs on every screen, a command palette (Ctrl/Cmd+K or `/`) over screens, sub-pages, actions and recent calls, `g` then a letter to jump (`g o` Overview, `g c` Call logs, `g p` Playground, `g y` Policies, `g e` Evals, `g s` Settings; `?` lists them), a call-count badge, and a sidebar that collapses to icons (remembered per browser). Below 900px the sidebar becomes a menu.
 
 ## Live mode API
 
@@ -47,5 +52,6 @@ All under `/api`, JSON in and out. With `CONSOLE_TOKEN` set, every `/api` route 
 ## Data and checks
 
 - `demo/data/evals.json` is written by `python scripts/export_console_data.py` from the repo's own eval scripts and test run. CI runs it with `--check` and fails if the committed eval and simulator results are stale.
+- `demo/data/sample_company.json` is written by `python scripts/generate_sample_company.py` (fixed seed, stated assumptions); CI runs it with `--check`, and `tests/test_sample_company.py` checks that every day's outcomes add up and that the file is labelled fictional.
 - `python scripts/demo_smoke.py` drives every screen in headless Chromium in demo mode, checks there are no page errors and no horizontal scroll at 390px and 1366px; `--live` adds the live-mode pass against the server; `--screenshots DIR` saves desktop and phone screenshots; `--pyodide-dir` serves Pyodide from a local copy for offline runs.
 - `tests/test_console.py` and `tests/test_console_server.py` cover the engine and the endpoints, including that the console's simulated callers produce exactly what `python -m evals.simulate` does, and that the signing secret never appears in a response.

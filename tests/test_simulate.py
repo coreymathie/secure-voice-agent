@@ -79,7 +79,7 @@ def test_cli_exit_codes(tmp_path, capsys):
     assert simulate.main(["--only", "benign-booker"]) == 0
     weak = tmp_path / "weak.yaml"
     weak.write_text(harness.POLICY_PATH.read_text().replace("  threshold: 4", "  threshold: 1", 1))
-    assert simulate.main(["--only", "benign-flooded-basement", "--policy", str(weak)]) == 1
+    assert simulate.main(["--only", "benign-payment-due-today", "--policy", str(weak)]) == 1
     bad = tmp_path / "bad.yaml"
     bad.write_text("tools: [")
     assert simulate.main(["--policy", str(bad)]) == 2
@@ -127,4 +127,4 @@ def test_simulator_measures_false_positives_from_an_over_eager_policy(tmp_path):
     weak.write_text(harness.POLICY_PATH.read_text().replace("  threshold: 4", "  threshold: 1", 1))
     results = simulate.run_all(policy=load_policy(weak))
     m = simulate.metrics(results)
-    assert m["false_positive_rate"] > 0 and "benign-flooded-basement" in m["false_positives"]
+    assert m["false_positive_rate"] > 0 and "benign-payment-due-today" in m["false_positives"]

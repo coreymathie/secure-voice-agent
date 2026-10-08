@@ -52,7 +52,7 @@ scenarios:
     steps:
       - at: 0
         tool: book_meeting
-        args: {caller_name: Dana Reyes, caller_email: dana@example.com, start_iso: "2026-10-06T14:00:00", topic: Roof estimate}
+        args: {caller_name: Dana Reyes, caller_email: dana@example.com, start_iso: "2026-10-06T14:00:00", topic: Auto loan consultation}
         expect: booked
     checks:
       side_effects: {calendar_events: 1}
@@ -93,8 +93,8 @@ scenarios:
     caller: "+19545550104"
     start_verified: true
     steps:
-      - {at: 0, tool: take_payment, call_id: call_abc, args: {amount_usd: 75, description: Tune-up, customer_email: sam@example.com}, expect: link_sent}
-      - {at: 3, tool: take_payment, call_id: call_abc, args: {amount_usd: 75, description: Tune-up, customer_email: sam@example.com}, expect: duplicate}
+      - {at: 0, tool: take_payment, call_id: call_abc, args: {amount_usd: 75, description: Personal loan payment, customer_email: sam@example.com}, expect: link_sent}
+      - {at: 3, tool: take_payment, call_id: call_abc, args: {amount_usd: 75, description: Personal loan payment, customer_email: sam@example.com}, expect: duplicate}
     checks:
       side_effects: {payment_links: 1, sms: 1}
 
@@ -117,7 +117,7 @@ scenarios:
     caller: "+19545550106"
     start_verified: true
     steps:
-      - {at: 0, tool: take_payment, upstream_down: [sms], args: {amount_usd: 80, description: Inspection, customer_email: ari@example.com}, expect: {status: sms_failed, absent_keys: [url]}}
+      - {at: 0, tool: take_payment, upstream_down: [sms], args: {amount_usd: 80, description: Credit card payment, customer_email: ari@example.com}, expect: {status: sms_failed, absent_keys: [url]}}
     checks:
       side_effects: {payment_links: 1, sms: 0}
 
@@ -229,12 +229,12 @@ scenarios:
       llm_lacks: [score, threshold, urgency, authority]
 
   - id: urgent-but-benign
-    title: A flooded basement is urgent, not suspicious
+    title: A payment due today is urgent, not suspicious
     risk: False positives blocking a legitimate payment
     caller: "+19545550116"
     start_verified: true
     steps:
-      - {at: 0, caller_said: "It's an emergency, my basement is flooding.", tool: take_payment, args: {amount_usd: 150, description: Emergency visit deposit, customer_email: lin@example.com}, expect: link_sent}
+      - {at: 0, caller_said: "It's an emergency, my loan payment is due today.", tool: take_payment, args: {amount_usd: 150, description: Auto loan minimum due, customer_email: lin@example.com}, expect: link_sent}
     checks:
       side_effects: {payment_links: 1, sms: 1}
       audit_lacks: [policy_handoff]
@@ -425,7 +425,7 @@ scenarios:
     caller: "+19545550130"
     call_start: {from_state: CA, digits: "2", recording_enabled: true, consent_mode: by_jurisdiction}
     steps:
-      - {at: 10, tool: book_meeting, args: {caller_name: Lu, caller_email: lu@example.com, start_iso: "2026-10-09T09:00:00", topic: Estimate}, expect: booked}
+      - {at: 10, tool: book_meeting, args: {caller_name: Lu, caller_email: lu@example.com, start_iso: "2026-10-09T09:00:00", topic: New account appointment}, expect: booked}
     checks:
       call_start_twiml_has: ["not a person", "<Gather", "Press 1 to allow recording"]
       disclosure_before_stream: true
