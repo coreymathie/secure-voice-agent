@@ -185,7 +185,7 @@ def demo_desktop(s: Smoke) -> None:
     page.wait_for_selector("#palette:not([hidden])")
     page.fill("#palette-input", "polic")
     page.keyboard.press("Enter")
-    page.wait_for_selector("#p-text, #p-result, section h2")
+    page.wait_for_selector("#p-text")  # Policies has painted, not just any heading on the old screen
     s.check("palette: jumps to a screen", page.url.endswith("#/policies") and page.is_hidden("#palette"))
     page.keyboard.press("g")
     page.keyboard.press("e")
