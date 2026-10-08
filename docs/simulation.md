@@ -30,7 +30,7 @@ Current result with the shipped policy (run locally, `python -m evals.simulate`)
 
 These numbers describe 14 hand-written scripts, not real callers. A 0% false-positive rate here means none of these benign scripts were blocked; it says nothing about the rate on real calls.
 
-Mutation tests (`tests/test_simulate.py`) weaken one control at a time and confirm the simulator notices: step-up skipped (the spoofed caller gets a payment link), the takeover rule removed, default deny removed (the invented refund tool runs), scrubbing removed (a card number leaks), and an over-eager risk threshold (the flooded-basement caller is blocked, so the false-positive rate goes above zero).
+Mutation tests (`tests/test_simulate.py`) weaken one control at a time and confirm the simulator notices: step-up skipped (the spoofed caller gets a payment link), the takeover rule removed, default deny removed (the invented refund tool runs), scrubbing removed (a card number leaks), and an over-eager risk threshold (the payment-due-today caller is blocked, so the false-positive rate goes above zero).
 
 ## In the console
 

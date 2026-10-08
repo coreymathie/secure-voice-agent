@@ -207,7 +207,9 @@ async def test_silent_call_is_ended_gracefully_and_audited(bot_env, monkeypatch)
     bot, audit_path = bot_env
     for k, v in {
         "CALL_IDLE_PROMPT_SECONDS": "0.1",
-        "CALL_IDLE_TIMEOUT_SECONDS": "0.2",
+        # Real time: leave several polls between the prompt and the hangup so a late poll on a busy
+        # CI runner can't jump straight past the prompt to the timeout.
+        "CALL_IDLE_TIMEOUT_SECONDS": "0.6",
         "CALL_GOODBYE_GRACE_SECONDS": "0.05",
         "CALL_LIMIT_POLL_SECONDS": "0.05",
     }.items():

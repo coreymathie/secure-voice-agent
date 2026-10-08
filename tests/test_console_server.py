@@ -43,7 +43,7 @@ def test_a_live_call_signs_every_tool_request(client):
     assert d["call_start"]["audit"]["recording"] == "started" and "not a person" in d["call_start"]["twiml"][0]
     d = client.post(
         f"/api/calls/{cid}/say",
-        json={"text": "I'd like to pay my invoice for the furnace tune-up, it's $180. Email lee@example.com"},
+        json={"text": "I'd like to make my personal loan payment, it's $180. Email lee@example.com"},
     ).json()
     code = d["phone"]["messages"][-1]["code"]
     d = client.post(f"/api/calls/{cid}/say", json={"text": f"it's {code}"}).json()

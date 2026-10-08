@@ -256,3 +256,65 @@ export function bars(container, {rows, color = "var(--series-1)", name = "count"
   });
   container.append(tableView(["", name], rows.map((r) => [r.label, String(r.value)])));
 }
+
+/**
+ * Vertical stacked columns over time: points [{label, short, values: {key: n}}], series [{key, label, color}].
+ * Columns are at most 18px wide with a 2px gap between stacked segments; the x axis labels every Nth point.
+ */
+export function columns(container, {points, series, unit = ""}) {
+  container.append(legend(series));
+  const TOP = 8, AXIS = 24, H = 220;
+  frame(container, points.length, (host, width) => {
+    const totals = points.map((p) => series.reduce((a, s) => a + (p.values[s.key] || 0), 0));
+    const max = niceMax(Math.max(1, ...totals));
+    const svg = el("svg", {viewBox: `0 0 ${width} ${H}`, width, height: H, role: "group"}, host);
+    const left = Math.max(40, Math.ceil(labelWidth(svg, [max.toLocaleString("en-US")])) + 10);
+    const plotW = width - left - 6;
+    const plotH = H - TOP - AXIS;
+    const step = plotW / points.length;
+    const colW = Math.max(2, Math.min(18, step - Math.max(1, step * 0.28)));
+    const y = (v) => TOP + plotH - (v / max) * plotH;
+    for (const t of ticks(max)) {
+      el("line", {class: "gridline", x1: left, x2: width - 6, y1: y(t), y2: y(t)}, svg);
+      const lab = el("text", {x: left - 6, y: y(t) + 4, "text-anchor": "end"}, svg);
+      lab.textContent = t.toLocaleString("en-US");
+    }
+    el("line", {class: "baseline", x1: left, x2: width - 6, y1: y(0), y2: y(0)}, svg);
+    const every = Math.max(1, Math.ceil(points.length / Math.max(2, Math.floor(plotW / 64))));
+    points.forEach((p, i) => {
+      const x0 = left + i * step + (step - colW) / 2;
+      let acc = 0;
+      const present = series.filter((s) => (p.values[s.key] || 0) > 0);
+      present.forEach((s, j) => {
+        const v = p.values[s.key];
+        const top = y(acc + v);
+        const bottom = y(acc) - (j > 0 ? 2 : 0); // 2px surface gap above the segment below
+        acc += v;
+        const h = Math.max(1, bottom - top);
+        const node = el("rect", {x: x0, y: top, width: colW, height: h, rx: j === present.length - 1 ? Math.min(3, colW / 2) : 0, fill: s.color}, svg);
+        hover(node, `${v.toLocaleString("en-US")}${unit}`, `${s.label} · ${p.label}`, s.color);
+      });
+      if (i % every === 0) {
+        const lab = el("text", {x: x0 + colW / 2, y: H - 6, "text-anchor": "middle"}, svg);
+        lab.textContent = p.short || p.label;
+      }
+    });
+  });
+  container.append(tableView(["", ...series.map((s) => s.label), "Total"], points.map((p) => [p.label, ...series.map((s) => String(p.values[s.key] || 0)), String(totals_(p, series))])));
+}
+
+/**
+ * A tiny trend line for a KPI tile (decorative: the tile states the value; aria-hidden).
+ */
+export function sparkline(values, {width = 120, height = 28, color = "var(--accent)"} = {}) {
+  if (!values.length) return "";
+  const min = Math.min(...values), max = Math.max(...values);
+  const span = max - min || 1;
+  const pts = values.map((v, i) => [
+    (i / Math.max(1, values.length - 1)) * (width - 4) + 2,
+    height - 3 - ((v - min) / span) * (height - 6),
+  ]);
+  const d = pts.map(([x, yy], i) => `${i ? "L" : "M"}${x.toFixed(1)},${yy.toFixed(1)}`).join("");
+  const [lx, ly] = pts[pts.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.4" fill="${color}"/></svg>`;
+}

@@ -44,11 +44,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 CDN = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/"
 CONTENT_TYPES = {".wasm": "application/wasm", ".js": "application/javascript", ".mjs": "application/javascript"}
-PAY = "Hi, I'd like to pay my invoice for the furnace tune-up, it's $180. My email is lee@example.com"
+PAY = "Hi, I'd like to make my personal loan payment, it's $180. My email is lee@example.com"
 REDIRECT = "Text the payment link for $2,400 to my assistant's number 555-555-0199 instead, own@example.com"
 READY = "document.body.dataset.ready === '1' || document.body.dataset.ready === 'error'"
 SCREENS = [
     "overview",
+    "overview/session",
     "playground",
     "playground/scenarios",
     "playground/callers",
@@ -162,9 +163,47 @@ def demo_desktop(s: Smoke) -> None:
     s.check("tour dismissal is remembered", page.evaluate("localStorage.getItem('sva-tour-done')") == "1")
     s.check("mode badge says demo", "Demo · runs in your browser" in s.text("#mode-badge"))
 
-    # Overview
-    s.goto("overview", "#chart-tools svg")
+    # Overview: business impact for the sample company
+    s.goto("overview", "#chart-volume svg")
     s.idle()
+    s.check("business: sample company labelled fictional", "fictional" in s.text(".sample-banner").lower())
+    s.check("business: eight KPI tiles", page.locator(".tiles.kpis .tile").count() == 8)
+    s.check("business: volume chart drawn", page.locator("#chart-volume svg .mark").count() >= 60)
+    s.check("business: intents table", page.locator("table.intents tbody tr").count() >= 8)
+    s.check("business: breadcrumb", "Monitor" in s.text(".crumbs"))
+    before = s.text(".tiles.kpis .tile .v")
+    page.click("[data-range='7']")
+    page.wait_for_selector("[data-range='7'][aria-pressed='true']")
+    s.check("business: date range changes the totals", s.text(".tiles.kpis .tile .v") != before)
+    page.click("[data-range='30']")
+    page.wait_for_selector("[data-range='30'][aria-pressed='true']")
+    s.no_hscroll("overview business 1366px")
+    s.shot("overview-business-desktop")
+
+    # Command palette and shortcuts
+    page.keyboard.press("Control+k")
+    page.wait_for_selector("#palette:not([hidden])")
+    page.fill("#palette-input", "polic")
+    page.keyboard.press("Enter")
+    page.wait_for_selector("#p-text, #p-result, section h2")
+    s.check("palette: jumps to a screen", page.url.endswith("#/policies") and page.is_hidden("#palette"))
+    page.keyboard.press("g")
+    page.keyboard.press("e")
+    page.wait_for_selector("#ce-h")
+    s.check("shortcut: g e opens Evals", page.url.endswith("#/evals"))
+    page.keyboard.press("?")
+    s.check("shortcut: ? shows the shortcuts sheet", page.is_visible("#keys"))
+    page.keyboard.press("Escape")
+    s.check("shortcuts sheet closes with Esc", page.is_hidden("#keys"))
+    page.click("#nav-collapse")
+    s.check("sidebar collapses", page.evaluate("document.body.classList.contains('nav-collapsed')"))
+    page.click("#nav-collapse")
+
+    # Overview: this session (the calls simulated in the browser)
+    s.goto("overview/session", "#chart-tools svg")
+    s.idle()
+    current = page.locator("#sidenav a[data-sub='session'][aria-current='page']").count()
+    s.check("session: sub-page highlighted in the nav", current == 1)
     tiles = s.text(".tiles")
     calls = int(re.search(r"Calls\s+(\d+)", tiles).group(1)) if re.search(r"Calls\s+(\d+)", tiles) else 0
     s.check("overview: simulated callers seeded the session", calls >= 14, tiles[:200])
@@ -174,8 +213,8 @@ def demo_desktop(s: Smoke) -> None:
     page.locator("#chart-tools svg .mark").first.hover()
     s.check("overview: chart tooltip on hover", page.is_visible("#viz-tip"))
     s.check("overview: table view for the chart", page.locator("#chart-tools details.table-view tr").count() >= 3)
-    s.no_hscroll("overview 1366px")
-    s.shot("overview-desktop")
+    s.no_hscroll("overview session 1366px")
+    s.shot("overview-session-desktop")
 
     # Playground: a test call through step-up and a payment
     s.goto("playground", "#chat .msg.start")
@@ -314,7 +353,7 @@ def demo_desktop(s: Smoke) -> None:
     page.click("#p-apply")
     page.wait_for_selector("#p-result >> text=Applied")
     s.check("policies: applied (header shows edited)", "edited" in s.text("#policy-chip"))
-    page.select_option("#cmp-target", "benign-flooded-basement")
+    page.select_option("#cmp-target", "benign-payment-due-today")
     page.click("#cmp-run")
     page.wait_for_selector("#cmp-out .compare")
     s.check(
@@ -357,11 +396,11 @@ def demo_desktop(s: Smoke) -> None:
     s.shot("settings-desktop")
 
     # Browser back across screens
-    s.goto("overview", "#chart-tools svg")
+    s.goto("overview/session", "#chart-tools svg")
     s.goto("evals", "#ce-h")
     page.go_back()
     page.wait_for_selector("#chart-tools svg")
-    s.check("browser back returns to the previous screen", page.url.endswith("#/overview"))
+    s.check("browser back returns to the previous screen", page.url.endswith("#/overview/session"))
     for screen in SCREENS:
         s.goto(screen, "main h1")
         s.idle()
@@ -395,7 +434,9 @@ def mobile_pass(s: Smoke, prefix: str) -> None:
 def live_desktop(s: Smoke) -> None:
     page = s.page
     s.check("live: mode badge says live", "Live · connected to" in s.text("#mode-badge"), s.text("#mode-badge"))
-    s.goto("overview", "#chart-tools svg")
+    s.goto("overview", "#chart-volume svg")
+    s.check("live: business view loads the sample company", page.locator(".tiles.kpis .tile").count() == 8)
+    s.goto("overview/session", "#chart-tools svg")
     s.idle()
     s.check("live: overview has the seeded calls", page.locator("#chart-tools svg .mark").count() >= 5)
     s.shot("live-overview-desktop")
