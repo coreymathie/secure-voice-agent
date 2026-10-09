@@ -563,6 +563,7 @@ table.intents .share { display: block; font-size: 12px; color: var(--ink-3); }
 
 /* ---------- business / technical view ---------- */
 body:not(.tech) .tech-only { display: none !important; }
+body.tech .biz-only { display: none !important; }
 .view-switch button { padding: 5px 10px; font-size: 12px; }
 @media (max-width: 1240px) { .view-switch { display: none; } }
 .mode-badge.starting::before { content: ""; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: currentColor; margin-right: 6px; vertical-align: 1px; animation: pulse 1.2s ease-in-out infinite; }

@@ -59,6 +59,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 from contextlib import ExitStack, contextmanager
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -69,6 +70,7 @@ import httpx
 import yaml
 from twilio.request_validator import RequestValidator
 
+from evals.scripted import resolve_dates
 from src.agent import disclosure, tools
 from src.handlers import (
     _common,
@@ -86,8 +88,8 @@ from src.safeguards.audit_log import AuditLog
 from src.safeguards.policy_config import DEFAULT_POLICY_PATH, LoadedPolicy, load_policy
 from src.safeguards.policy_gate import CallPolicy
 from src.safeguards.step_up import (
-    CustomerRecord,
     InMemoryCrm,
+    MemberRecord,
     SimulatedVerifier,
     StaticRiskSignals,
     StepUpSession,
@@ -97,6 +99,7 @@ from src.safeguards.velocity import VelocityStore
 
 SCENARIOS_PATH = Path(__file__).with_name("scenarios.yaml")
 POLICY_PATH = DEFAULT_POLICY_PATH  # config/policy.yaml
+DEFAULT_CALLER = "+19545550100"  # fictional 555-01xx number in the sample credit union's area code
 
 
 class RefundBackend:
@@ -385,21 +388,21 @@ def _expectation(spec: Any) -> dict:
     return {"status": spec} if isinstance(spec, str) else dict(spec)
 
 
-def _customers(scenario: dict) -> InMemoryCrm:
-    """The scenario's CRM records; by default every caller in it is a customer with their own number on file."""
-    if "customers" in scenario:
+def _members(scenario: dict) -> InMemoryCrm:
+    """The scenario's CRM records; by default every caller in it is a member with their own number on file."""
+    if "members" in scenario:
         return InMemoryCrm(
-            CustomerRecord(
+            MemberRecord(
                 customer_id=c["customer_id"],
                 phone_on_file=c.get("phone_on_file"),
                 email_on_file=c.get("email_on_file"),
                 lookup_numbers=tuple(c.get("lookup_numbers", ())),
             )
-            for c in scenario["customers"]
+            for c in scenario["members"]
         )
-    callers = {scenario.get("caller", "+15555550100")} | {st["caller"] for st in scenario["steps"] if "caller" in st}
+    callers = {scenario.get("caller", DEFAULT_CALLER)} | {st["caller"] for st in scenario["steps"] if "caller" in st}
     return InMemoryCrm(
-        CustomerRecord(customer_id=f"cust_{n}", phone_on_file=c) for n, c in enumerate(sorted(callers), start=1)
+        MemberRecord(customer_id=f"cust_{n}", phone_on_file=c) for n, c in enumerate(sorted(callers), start=1)
     )
 
 
@@ -440,7 +443,7 @@ def _twilio_post(handler, path: str, form: dict) -> str:
 
 def _run_call_start(scenario: dict, up: Upstreams, audit: AuditLog, call_sid: str) -> None:
     spec = scenario["call_start"]
-    caller = scenario.get("caller", "+15555550100")
+    caller = scenario.get("caller", DEFAULT_CALLER)
     env = {
         var: str(spec[key]).lower() if isinstance(spec[key], bool) else str(spec[key])
         for key, var in CALL_START_ENV.items()
@@ -477,7 +480,7 @@ async def _run_steps(
     call_sid = "CA" + hashlib.md5(scenario["id"].encode()).hexdigest()  # a well-formed Twilio call SID
     if "call_start" in scenario:
         _run_call_start(scenario, up, audit, call_sid)
-    crm = _customers(scenario)
+    crm = _members(scenario)
     risk = StaticRiskSignals(scenario.get("risk_signals", {}))
     verifier = SimulatedVerifier(clock=clock, code_factory=_eval_codes(), sent=up.verification_codes)
     steps: list[StepResult] = []
@@ -499,7 +502,7 @@ async def _run_steps(
     for i, step in enumerate(scenario["steps"], start=1):
         clock.now = float(step.get("at", 0))
         up.down = set(step.get("upstream_down", []))
-        caller = step.get("caller", scenario.get("caller", "+15555550100"))
+        caller = step.get("caller", scenario.get("caller", DEFAULT_CALLER))
         policy, executors = call_for(caller)
         said = step.get("caller_said", [])
         for turn in [said] if isinstance(said, str) else said:
@@ -652,8 +655,9 @@ def run_scenario(scenario: dict, policy: LoadedPolicy | None = None) -> Scenario
     )
 
 
-def load_scenarios(path: Path = SCENARIOS_PATH) -> list[dict]:
-    data = yaml.safe_load(path.read_text())
+def load_scenarios(path: Path = SCENARIOS_PATH, base: date | None = None) -> list[dict]:
+    """The scenario file, with "$DATE(...)" values resolved against `base` (default: today)."""
+    data = resolve_dates(yaml.safe_load(path.read_text()), base)
     ids = [s["id"] for s in data["scenarios"]]
     if len(ids) != len(set(ids)):
         raise ValueError("scenario ids must be unique")

@@ -25,9 +25,10 @@ def test_daily_outcomes_add_up():
         assert d["contained"] + d["transferred"] + d["abandoned"] == d["calls"]
         assert 0 <= d["after_hours"] <= d["calls"]
         assert d["stepup_passed"] <= d["stepups"]
-        assert d["fraud_blocked"] == (
-            d["sim_swap_holds"] + d["social_engineering_handoffs"] + d["takeover_patterns"] + d["otp_lockouts"]
-        )
+        assert d["card_numbers_scrubbed"] <= d["pii_scrubbed"]
+        assert 0 <= d["recording_declined"] <= d["calls"]
+        # Fraud attempts are the three fraud controls; verification lockouts are counted on their own.
+        assert d["fraud_blocked"] == d["sim_swap_holds"] + d["social_engineering_handoffs"] + d["takeover_patterns"]
 
 
 def test_it_is_labelled_fictional_and_assumptions_are_stated():
@@ -44,7 +45,9 @@ def test_recent_calls_are_reproducible_and_on_the_last_day():
     assert len(calls) == gen.RECENT_CALLS
     starts = [c["started"] for c in calls]
     assert starts == sorted(starts, reverse=True)
-    assert all(s.startswith(gen.END.isoformat()) and s <= gen.LAST_CALL.isoformat() for s in starts)
+    through = gen.build()["recent_calls"]["through"]
+    assert starts[0] == through
+    assert all(s.startswith(gen.END.isoformat()) and s <= through for s in starts)
     assert len({c["id"] for c in calls}) == len(calls)
 
 

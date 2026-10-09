@@ -36,7 +36,8 @@ def test_card_numbers_never_reach_the_backend_or_the_log(tmp_path):
     body = step["sent_to_backend"]["body"]
     assert "4111 1111 1111 1111" not in body and "[REDACTED_PAN]" in body and "123-45-6789" not in body
     raw = e.audit.path.read_text()
-    assert "4111" not in raw and "max@example.com" not in raw
+    # Any run of card digits, not just "4111": random hex hashes in the log can contain those four characters.
+    assert not re.search(r"4111[ -]?1111", raw) and "max@example.com" not in raw
     assert any(st["stage"] == "PII scrub" and st["outcome"] == "scrubbed" for st in step["stages"])
 
 

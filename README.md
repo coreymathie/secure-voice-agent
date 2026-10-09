@@ -45,7 +45,7 @@ The constraints are those of a regulated institution:
 | Auditability and separation of duties | Every decision reproducible; policy changes reviewed | Hash-chained audit log; policy as a reviewed file gated by evals; [`docs/policy.md`](docs/policy.md) |
 | Operating model | Escalations reach a person; outages fail safely | Handoff statuses, safe failure handling; [`docs/operations.md`](docs/operations.md) |
 
-The solution design targets a credit union's member line. The outcomes it is measured on are the ones the console's business-impact view reports for the sample workspace: calls answered, calls resolved without a transfer, payments collected, fraud attempts stopped, the verified-before-money-moved rate, member satisfaction, and member-services cost avoided (with its per-call cost assumptions stated).
+The solution design targets a credit union's member line. The outcomes it is measured on are the ones the console's business-impact view reports for the sample workspace: calls answered, calls resolved without a transfer, payments collected, fraud attempts stopped, the step-up pass rate (no payment without a passed code), member satisfaction, and member-services cost avoided (with its per-call cost assumptions stated).
 
 ## Reference architecture
 
@@ -156,11 +156,11 @@ How each control behaves, with its defaults, is in [`docs/controls.md`](docs/con
 
 | Evidence | Result | How it is produced | Label |
 |---|---|---|---|
-| Unit and integration tests | 417 tests (10 are skipped if fakeredis is not installed) | `pytest -q` | measured |
+| Unit and integration tests | 458 tests (10 are skipped if fakeredis is not installed) | `pytest -q` | measured |
 | Call evals | 31/31 scenarios | `python -m evals.run`, through the real stack | measured |
 | Mutation tests | 22 | Part of the pytest suite: 17 switch off one control and confirm the evals fail; 5 do the same for the simulator | measured |
 | Simulated callers | 14 personas: 7/7 benign and impatient callers succeeded, 7/7 adversarial callers stopped, 0 benign callers blocked | `python -m evals.simulate`, a scripted agent and hand-written callers | simulated |
-| Console smoke test | 138 checks across both console modes | `python scripts/demo_smoke.py --live`, headless Chromium | measured |
+| Console smoke test | 145 checks across both console modes | `python scripts/demo_smoke.py --live`, headless Chromium | measured |
 
 **Call evals.** The 31 scenarios ([`evals/scenarios.yaml`](evals/scenarios.yaml)) cover 13 from 0.4.0 (payment bursts, slow-drip payments, replayed requests, provider outages, a card number read into a ticket, a prompt-injected redirect of a payment link, and more), 5 for the policy gate (social-engineering handoff, a benign urgent caller who must *not* be blocked, the per-call USD ceiling, a backend tool the agent was never granted, the per-call action ceiling), 5 for step-up verification (spoofed caller ID, verify-then-pay, code guessing and lockout, a SIM-swap signal, change-the-email-then-pay), 3 for keypad payments (recording paused before capture, capture refused when it can't be paused, amount limit in keypad mode), and 5 for call start (the AI disclosure comes first; declined, silent and granted recording consent; a one-party-state notice). Call-start scenarios run the real webhook Lambdas with Twilio-signed requests.
 
@@ -242,7 +242,7 @@ Demo mode: `python -m http.server 8000` from the repository root, then open http
 ### Run the checks
 
 ```bash
-ruff check . && ruff format --check . && pytest -q   # 417 tests (10 are skipped if fakeredis is not installed)
+ruff check . && ruff format --check . && pytest -q   # 458 tests (10 are skipped if fakeredis is not installed)
 python -m src.safeguards.policy_config config/policy.yaml   # validate the policy file
 python -m evals.simulate                              # 14 scripted callers, multi-turn
 python -m evals.run                                   # 31/31 scenarios

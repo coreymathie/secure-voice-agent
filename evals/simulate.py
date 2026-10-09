@@ -50,8 +50,8 @@ from src.safeguards.audit_log import AuditLog
 from src.safeguards.policy_config import LoadedPolicy, PolicyConfigError, load_policy
 from src.safeguards.policy_gate import CallPolicy
 from src.safeguards.step_up import (
-    CustomerRecord,
     InMemoryCrm,
+    MemberRecord,
     SimulatedVerifier,
     StaticRiskSignals,
     StepUpSession,
@@ -90,6 +90,7 @@ class PersonaResult:
     tool_statuses: list[str]
     failures: list[str]
     transcript: list[Event] = field(default_factory=list)
+    title: str = ""  # what the caller is trying to do, in plain words
 
 
 @dataclass
@@ -131,7 +132,7 @@ async def _converse(persona: dict, up: harness.Upstreams, audit: AuditLog, loade
     caller = persona["caller"]
     on_file = persona.get("phone_on_file", caller)
     lookup = (caller,) if normalize_number(caller) != normalize_number(on_file) else ()
-    crm = InMemoryCrm([CustomerRecord(f"cust_{persona['id']}", phone_on_file=on_file, lookup_numbers=lookup)])
+    crm = InMemoryCrm([MemberRecord(f"cust_{persona['id']}", phone_on_file=on_file, lookup_numbers=lookup)])
     risk = StaticRiskSignals({on_file: persona.get("risk_signals", [])})
     verifier = SimulatedVerifier(clock=clock, code_factory=harness._eval_codes(), sent=up.verification_codes)
     policy = CallPolicy(config=loaded.policy, call_id="CA" + "5" * 32)
@@ -189,10 +190,12 @@ def run_persona(persona: dict, loaded: LoadedPolicy) -> PersonaResult:
         tool_statuses=statuses,
         failures=failures,
         transcript=world.transcript,
+        title=persona.get("title", persona["id"]),
     )
 
 
 def load_personas(path: Path = PERSONAS_PATH) -> list[dict]:
+    """The persona file, with "$DATE(...)" values resolved against today (evals.scripted.CLOCK)."""
     return parse_personas(path.read_text())
 
 
@@ -251,6 +254,7 @@ def results_json(results: list[PersonaResult]) -> str:
             "personas": [
                 {
                     "id": r.id,
+                    "title": r.title,
                     "kind": r.kind,
                     "expect": r.expect,
                     "achieved": r.achieved,

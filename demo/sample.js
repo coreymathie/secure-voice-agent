@@ -1,6 +1,7 @@
 // Corey Mathie, 2026
 // The sample company's data files. They keep fixed dates so they stay reproducible; the console shows
-// them moved forward so the newest sample call lands today (or yesterday, before that time of day).
+// them moved forward by whole weeks, so every sample day keeps its weekday (weekend dips stay on
+// weekends) and the newest sample day is the latest one with that weekday whose last call has passed.
 
 const DAY = 86400000;
 let company = null;
@@ -8,14 +9,20 @@ let calls = null;
 let byId = null;
 let offsetDays = 0;
 
-function computeShift(throughIso) {
+/** Days to add to a sample date: a whole number of weeks, never past the current time. */
+export function weekShift(throughIso, now = new Date()) {
   const through = new Date(throughIso);
-  const now = new Date();
-  const target = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const secs = (d) => d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
-  if (secs(now) < secs(through)) target.setDate(target.getDate() - 1);
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const base = new Date(through.getFullYear(), through.getMonth(), through.getDate());
-  offsetDays = Math.round((target - base) / DAY);
+  const secs = (d) => d.getHours() * 3600 + d.getMinutes() * 60 + d.getSeconds();
+  const days = Math.round((today - base) / DAY);
+  let shift = days - (((days % 7) + 7) % 7);
+  if (shift === days && secs(now) < secs(through)) shift -= 7;
+  return shift;
+}
+
+function computeShift(throughIso) {
+  offsetDays = weekShift(throughIso);
 }
 
 async function getJson(path, what) {

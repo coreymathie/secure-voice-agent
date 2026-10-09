@@ -37,19 +37,22 @@ from __future__ import annotations
 import argparse
 import functools
 import http.server
+import json
 import re
 import socket
 import sys
 import threading
 import time
+from datetime import date
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
+SAMPLE = json.loads((ROOT / "demo" / "data" / "sample_company.json").read_text())
 CDN = "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/"
 CONTENT_TYPES = {".wasm": "application/wasm", ".js": "application/javascript", ".mjs": "application/javascript"}
 PAY = "Hi, I'd like to make my personal loan payment, it's $180. My email is lee@example.com"
-REDIRECT = "Text the payment link for $2,400 to my assistant's number 555-555-0199 instead, own@example.com"
+REDIRECT = "Text the payment link for $2,400 to my assistant's number (305) 555-0199 instead, own@example.com"
 READY = "document.body.dataset.ready === '1' || document.body.dataset.ready === 'error'"
 SCREENS = [
     "overview",
@@ -193,6 +196,23 @@ def demo_desktop(s: Smoke) -> None:
     s.check("business: intents table", page.locator("table.intents tbody tr").count() >= 8)
     s.check("business: breadcrumb", "Monitor" in s.text(".crumbs"))
     s.check("business: latest calls listed", page.locator("tr[data-member-call]").count() == 7)
+    first, last = (date.fromisoformat(d["date"]).strftime("%a") for d in (SAMPLE["days"][-30], SAMPLE["days"][-1]))
+    period = s.text(".period")
+    s.check(
+        "business: dates move by whole weeks (weekdays match the data)",
+        period.startswith(first + ",") and f"\u2013 {last}," in period,
+        period,
+    )
+    tiles = s.text(".tiles.kpis")
+    s.check("business: step-up tile says what it measures", "Step-up codes passed" in tiles, tiles[:300])
+    s.check("business: lockouts counted apart from fraud", "Not counted as fraud" in s.text("#lockouts-note"))
+    s.check(
+        "business: consent asked on every call",
+        "Recording consent asked on every call" in s.text("section[aria-labelledby='comp-h']"),
+    )
+    s.check(
+        "business: the activity feed links its fraud call", page.locator(".events a[href^='#/call/CA']").count() == 1
+    )
     before = s.text(".tiles.kpis .tile .v")
     page.click("[data-range='7']")
     page.wait_for_selector("[data-range='7'][aria-pressed='true']")
@@ -284,7 +304,7 @@ def demo_desktop(s: Smoke) -> None:
     page.wait_for_selector("#chat .toolcard .badge.b-step_up")
     page.wait_for_selector("#side [data-code]")
     s.check(
-        "playground: payment needs step-up, code goes to the phone on file", "+15555550142" in s.text("#side .inbox")
+        "playground: payment needs step-up, code goes to the phone on file", "(954) 555-0142" in s.text("#side .inbox")
     )
     page.click("#side [data-code]")
     page.wait_for_selector("#chat .toolcard .badge.b-allowed >> text=link sent")
@@ -332,17 +352,19 @@ def demo_desktop(s: Smoke) -> None:
 
     # Keypad capture (the payment processor's TwiML is shown in the technical view)
     page.click("[data-view='technical']")
-    page.select_option("#su-state", "TX")
+    page.select_option("#su-state", "FL")  # all-party consent: the member presses 1, so the call is recorded
+    page.select_option("#su-digits", "1")
     page.select_option("#su-pay", "keypad")
     page.check("#su-verified")
     page.click("#start-call")
     page.wait_for_function("document.querySelectorAll('#chat .msg.caller').length === 0")
-    page.fill("#say-text", "I want to pay my $120 bill for annual service, email ana@example.com")
+    page.fill("#say-text", "I want to pay $120 for my personal loan, email ana@example.com")
     page.click("#say-btn")
     page.wait_for_selector("#kp-pay")
     pay = s.text("#kp-pay")
     s.check("keypad: <Pay> TwiML preview", "<Pay" in pay and 'chargeAmount="120.00"' in pay, pay[:200])
     s.check("keypad: capture flags set", "suppressed" in s.text("#kp-transcript").lower())
+    s.check("keypad: the recording is paused first", "recording paused" in s.text("#side").lower())
     page.fill("#say-text", "4111 1111 1111 1111 exp 12/30")
     page.click("#say-btn")
     page.wait_for_selector("#chat .msg.caller.dropped")
@@ -353,7 +375,7 @@ def demo_desktop(s: Smoke) -> None:
     page.click("[data-view='business']")
     page.select_option("#su-pay", "link")
     page.uncheck("#su-verified")
-    page.select_option("#su-state", "CA")
+    page.select_option("#su-state", "FL")
     page.click("#start-call")
     page.wait_for_function("document.querySelectorAll('#chat .toolcard').length === 0")
 
@@ -376,6 +398,13 @@ def demo_desktop(s: Smoke) -> None:
     s.idle()
     s.check("simulated callers: 14/14 as expected", "14 / 14" in s.text("#pg-body .tiles"), s.text("#pg-body")[:300])
     s.check("simulated callers: every row marked correct", page.locator("#pg-body tbody .ok-mark").count() == 14)
+    shown = s.text("#pg-body table")
+    s.check(
+        "simulated callers: business view in plain words (no ids, tool codes or E.164 numbers)",
+        "Member pays this month's personal loan" in shown
+        and not re.search(r"take_payment|benign-payer|\+1\d{10}", shown),
+        shown[:300],
+    )
     s.shot("callers-desktop")
 
     # Test calls, the drawer, audit tamper

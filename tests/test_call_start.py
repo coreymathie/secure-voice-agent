@@ -87,12 +87,12 @@ def test_config_from_env():
             "RECORDING_CONSENT_MODE": "by_jurisdiction",
             "RECORDING_ALL_PARTY_STATES": "ca, wa",
             "BUSINESS_JURISDICTION": "tx",
-            "AI_DISCLOSURE_TEXT": "You're speaking with an AI assistant for Example Plumbing.",
+            "AI_DISCLOSURE_TEXT": "You're speaking with an AI assistant for Example Credit Union.",
         }
     )
     assert cfg.recording_enabled and cfg.consent_mode == "by_jurisdiction"
     assert cfg.all_party == frozenset({"CA", "WA"}) and cfg.business_jurisdiction == "TX"
-    assert "Example Plumbing" in cfg.disclosure
+    assert "Example Credit Union" in cfg.disclosure
     d = cs.CallStartConfig.from_env({"RECORDING_CONSENT_MODE": "sometimes", "AI_DISCLOSURE_TEXT": "  "})
     assert d.consent_mode == "always" and d.disclosure == cs.DEFAULT_DISCLOSURE and not d.recording_enabled
 
@@ -135,7 +135,7 @@ def test_consent_twiml_carries_the_result():
 
 
 def test_twiml_escapes_configured_text():
-    cfg = cs.CallStartConfig(disclosure='AI assistant for "Tom & Jo\'s" <Plumbing>')
+    cfg = cs.CallStartConfig(disclosure='AI assistant for "Jo & Lee\'s" <Credit Union>')
     xml = cs.build_voice_twiml(STREAM, CONSENT, {"From": "+1"}, cfg)
     assert _root(xml).find("Say").text == cfg.disclosure
 

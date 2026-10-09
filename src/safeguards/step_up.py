@@ -4,14 +4,14 @@ Step-up verification: a one-time code sent to the contact on file, checked
 before high-tier tools run.
 
 Caller ID is a claim, not an identity: it can be spoofed, so it is used here
-only to *look up* a customer record. The code always goes to the phone number on
+only to *look up* a member record. The code always goes to the phone number on
 that record, never to the number the call came from (unless they are the same
 record value) and never to a number the caller or the model supplies. A caller
 who spoofed someone else's number gets that person's code sent to that person.
 
 Pieces, each behind a small interface so a deployment can swap it:
 
-  CrmLookup           find_by_caller_id(caller_id) -> CustomerRecord | None
+  CrmLookup           find_by_caller_id(caller_id) -> MemberRecord | None
                       (InMemoryCrm for tests, evals, the demo, and a JSON file in
                       local development; implement it against your CRM)
   Verifier            start(destination, channel) / check(destination, code)
@@ -74,24 +74,27 @@ def normalize_number(number: str | None) -> str:
 
 
 @dataclass(frozen=True)
-class CustomerRecord:
+class MemberRecord:
     customer_id: str
     phone_on_file: str | None = None  # where one-time codes go
     email_on_file: str | None = None
-    lookup_numbers: tuple[str, ...] = ()  # other numbers that identify this customer (lookup only)
+    lookup_numbers: tuple[str, ...] = ()  # other numbers that identify this member (lookup only)
+
+
+CustomerRecord = MemberRecord  # the earlier name, kept so existing imports still work
 
 
 class CrmLookup(Protocol):
-    def find_by_caller_id(self, caller_id: str) -> CustomerRecord | None: ...
+    def find_by_caller_id(self, caller_id: str) -> MemberRecord | None: ...
 
 
 class InMemoryCrm:
     """CRM lookup from a list of records. Matches the caller ID against phone_on_file and lookup_numbers."""
 
-    def __init__(self, records: Iterable[CustomerRecord] = ()):
+    def __init__(self, records: Iterable[MemberRecord] = ()):
         self.records = list(records)
 
-    def find_by_caller_id(self, caller_id: str) -> CustomerRecord | None:
+    def find_by_caller_id(self, caller_id: str) -> MemberRecord | None:
         wanted = normalize_number(caller_id)
         if not wanted:
             return None
@@ -105,7 +108,7 @@ class InMemoryCrm:
         """Load records from a JSON list of {customer_id, phone_on_file, email_on_file, lookup_numbers}."""
         rows = json.loads(Path(path).read_text())
         return cls(
-            CustomerRecord(
+            MemberRecord(
                 customer_id=str(r["customer_id"]),
                 phone_on_file=r.get("phone_on_file"),
                 email_on_file=r.get("email_on_file"),
@@ -118,7 +121,7 @@ class InMemoryCrm:
 class NoCrm:
     """No customer lookup configured: nobody can be verified, so high-tier tools hand off."""
 
-    def find_by_caller_id(self, caller_id: str) -> CustomerRecord | None:
+    def find_by_caller_id(self, caller_id: str) -> MemberRecord | None:
         return None
 
 
@@ -126,11 +129,11 @@ class NoCrm:
 
 
 class RiskSignalProvider(Protocol):
-    def signals(self, record: CustomerRecord, destination: str) -> frozenset[str]: ...
+    def signals(self, record: MemberRecord, destination: str) -> frozenset[str]: ...
 
 
 class NoRiskSignals:
-    def signals(self, record: CustomerRecord, destination: str) -> frozenset[str]:
+    def signals(self, record: MemberRecord, destination: str) -> frozenset[str]:
         return frozenset()
 
 
@@ -140,7 +143,7 @@ class StaticRiskSignals:
     def __init__(self, by_number: Mapping[str, Iterable[str]] | None = None):
         self.by_number = {normalize_number(k): frozenset(v) for k, v in (by_number or {}).items()}
 
-    def signals(self, record: CustomerRecord, destination: str) -> frozenset[str]:
+    def signals(self, record: MemberRecord, destination: str) -> frozenset[str]:
         return self.by_number.get(normalize_number(destination), frozenset())
 
 
@@ -329,7 +332,7 @@ class StepUpSession:
         self.failed_attempts = 0
         self.locked = False
         self.verified = False
-        self._record: CustomerRecord | None = None
+        self._record: MemberRecord | None = None
         self._looked_up = False
         self._sent_at: float | None = None
         self._channel: str | None = None
@@ -338,7 +341,7 @@ class StepUpSession:
     def blocking(self) -> bool:
         return bool(getattr(self.verifier, "blocking", False))
 
-    def record(self) -> CustomerRecord | None:
+    def record(self) -> MemberRecord | None:
         """Look the caller up once. Caller ID is only a lookup key."""
         if not self._looked_up:
             self._record = self.crm.find_by_caller_id(self.caller_id)

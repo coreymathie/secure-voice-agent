@@ -129,7 +129,7 @@ def test_evals_catch_codes_sent_to_caller_id(monkeypatch):
 
     def caller_id_as_identity(self):
         record = real(self)
-        return record and step_up.CustomerRecord(record.customer_id, phone_on_file=self.caller_id)
+        return record and step_up.MemberRecord(record.customer_id, phone_on_file=self.caller_id)
 
     monkeypatch.setattr(step_up.StepUpSession, "record", caller_id_as_identity)
     assert "caller-id-is-not-identity" in _failed()

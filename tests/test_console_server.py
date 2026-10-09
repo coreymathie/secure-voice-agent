@@ -57,9 +57,10 @@ def test_a_live_call_signs_every_tool_request(client):
 
 
 def test_keypad_mode_runs_the_keypad_lambda(client):
-    cid = client.post("/api/calls", json={"state": "TX", "payment_mode": "keypad", "start_verified": True}).json()["id"]
+    opts = {"state": "FL", "digits": "1", "payment_mode": "keypad", "start_verified": True}
+    cid = client.post("/api/calls", json=opts).json()["id"]
     d = client.post(
-        f"/api/calls/{cid}/say", json={"text": "Pay my $120 bill for annual service, email ana@example.com"}
+        f"/api/calls/{cid}/say", json={"text": "I want to pay $120 for my personal loan, email ana@example.com"}
     ).json()
     t = d["tool_calls"][-1]
     assert t["result"]["status"] == "keypad_started" and t["requests"][0]["route"] == "/keypad_payment"
@@ -114,7 +115,7 @@ def test_secrets_never_leave_the_server():
     signing = Signing(secret="super-secret-value-for-the-test")
     client = TestClient(create_app(token="", seed=False, world=LiveWorld(signing)))
     cid = client.post("/api/calls", json={"start_verified": True}).json()["id"]
-    client.post(f"/api/calls/{cid}/say", json={"text": "Pay my $50 deposit please, email a@example.com"})
+    client.post(f"/api/calls/{cid}/say", json={"text": "Pay $50 on my credit card please, email a@example.com"})
     seen = "".join(
         client.get(path).text
         for path in ("/api/settings", "/api/calls", f"/api/calls/{cid}", "/api/overview", "/api/info", "/api/evals")
