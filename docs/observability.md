@@ -1,5 +1,7 @@
 # Observability
 
+This document describes the operational telemetry: what the voice process traces, which safeguard decisions it emits as span events, the privacy risk in Pipecat's own spans, how to view traces, and how time-to-first-audio is defined and computed. Traces are the operational view; the hash-chained audit log remains the evidence record.
+
 Tracing is **off by default**. Set `OTEL_EXPORTER_OTLP_ENDPOINT` and the voice process turns on Pipecat's OpenTelemetry tracing and adds safeguard decisions as span events. Nothing else changes.
 
 ```bash
@@ -17,7 +19,7 @@ How it's wired:
 
 Tests: `tests/test_observability.py`, `tests/test_bot_wiring.py::test_tracing_flag_reaches_the_pipeline_worker`.
 
-## What you get
+## What is emitted
 
 **Pipecat spans** (from Pipecat 1.12's tracing; names and attributes are Pipecat's):
 
@@ -27,7 +29,7 @@ Tests: `tests/test_observability.py`, `tests/test_bot_wiring.py::test_tracing_fl
 | `turn` (one per exchange) | `turn.number`, `turn.duration_seconds`, `turn.was_interrupted`, `turn.user_bot_latency_seconds` |
 | `stt`, `llm`, `tts`, realtime-service spans | `metrics.ttfb`, `gen_ai.provider.name`, `gen_ai.request.model`, token usage, and content attributes (see privacy below) |
 
-**Safeguard events** (added by this repo):
+**Safeguard events** (added by this repository):
 
 | Event | Attributes |
 |---|---|
@@ -40,7 +42,7 @@ Safeguard events carry codes, counts, tiers, and scores only: no transcript text
 
 ## Privacy: Pipecat spans contain conversation content
 
-Pipecat's service spans include attributes such as `transcript`, `output`, `text`, and `gen_ai.system_instructions`. With tracing on, **caller speech goes to your tracing backend**. Either send traces only to a backend you'd trust with call transcripts (self-hosted, access-controlled, with a retention policy), or drop those attributes in an OpenTelemetry Collector before export:
+Pipecat's service spans include attributes such as `transcript`, `output`, `text`, and `gen_ai.system_instructions`. With tracing on, **caller speech goes to the tracing backend**. Either send traces only to a backend trusted with call transcripts (self-hosted, access-controlled, with a retention policy), or drop those attributes in an OpenTelemetry Collector before export:
 
 ```yaml
 processors:
@@ -72,7 +74,7 @@ docker run --rm -p 6006:6006 arizephoenix/phoenix:latest
 export OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:6006
 ```
 
-**Langfuse (cloud or self-hosted).** Langfuse accepts OTLP/HTTP at `/api/public/otel` with Basic auth from your project keys:
+**Langfuse (cloud or self-hosted).** Langfuse accepts OTLP/HTTP at `/api/public/otel` with Basic auth from the project keys:
 
 ```bash
 export OTEL_EXPORTER_OTLP_ENDPOINT=https://cloud.langfuse.com/api/public/otel
@@ -85,7 +87,7 @@ Useful queries once data is flowing: filter spans by `safeguard.decision = hando
 
 **Definition used here:** `turn.user_bot_latency_seconds`, which Pipecat's `UserBotLatencyObserver` measures inside the voice process from the moment the caller stopped speaking (the VAD's stop time, adjusted back by the VAD `stop_secs` window) to the bot's first audio frame (`BotStartedSpeakingFrame`). It includes endpointing wait, STT, model, and TTS time. It **excludes** the Twilio media-stream hop and the phone network in both directions, so the caller's perceived delay is higher.
 
-`evals/latency.py` computes percentiles from data you export:
+`evals/latency.py` computes percentiles from exported data:
 
 ```bash
 # OpenTelemetry Collector `file` exporter (OTLP/JSON lines), or a single OTLP/JSON export
@@ -101,7 +103,7 @@ python -m evals.latency --format log voice.log
 
 Output is a table of n, p50, p95, p99, and max for `time_to_first_audio_s` plus each service's `<span>.ttfb_s`. Percentiles use linear interpolation between ranks (numpy's default). With fewer than 20 samples the script warns that p95/p99 aren't meaningful.
 
-**No latency figures are published in this repo.** None have been measured here: that needs live calls with real provider keys. Results depend on provider and model, region, network path, VAD settings, and prompt length, so report them with those conditions attached.
+**No latency figures are published in this repository.** None have been measured here: that needs live calls with real provider keys. Results depend on provider and model, region, network path, VAD settings, and prompt length, so report them with those conditions attached.
 
 ## Audit log vs traces
 

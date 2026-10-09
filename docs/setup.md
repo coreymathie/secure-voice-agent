@@ -1,15 +1,15 @@
 # Setup
 
-From zero to a working voice agent on a real phone number, running locally.
+This document takes a local development environment from zero to a working voice agent on a real phone number. It runs the voice process on a workstation behind a tunnel; production deployment is in [`deploy.md`](deploy.md).
 
 ## 1. Prerequisites
 
 - Python 3.11+
 - A Twilio account with one voice-capable phone number
-- An OpenAI API key (default provider). For the other providers you'll need Anthropic + Deepgram + ElevenLabs keys, or a Google API key.
-- `ngrok` (or any tunnel) so Twilio can reach your machine
+- An OpenAI API key (default provider). The other providers need Anthropic + Deepgram + ElevenLabs keys, or a Google API key.
+- `ngrok` (or any tunnel) so Twilio can reach the workstation
 
-The tool handlers (calendar, payments, tickets, leads) are optional for a first call. Without `LAMBDA_BASE_URL` set, the agent will still talk; tool calls will return a safe "didn't go through" message, which the audit log records.
+The tool handlers (calendar, payments, tickets, leads) are optional for a first call. Without `LAMBDA_BASE_URL` set, the agent still talks; tool calls return a safe "didn't go through" message, which the audit log records.
 
 Payments and contact changes need step-up verification ([`auth.md`](auth.md)). To try it locally, point `CRM_LOOKUP_FILE` at a JSON file like `[{"customer_id": "c1", "phone_on_file": "+15555550142", "lookup_numbers": ["+15555550100"]}]` and set `TWILIO_VERIFY_SERVICE_SID`. Without them, those tools hand off to a person.
 
@@ -48,7 +48,7 @@ Copy the ngrok host into `AGENT_PUBLIC_WS_URL` and restart the server.
 
 Twilio console → Phone Numbers → your number → **Voice configuration** → "A call comes in" → Webhook → `https://<your-ngrok-host>/voice` → HTTP POST → Save.
 
-Call the number. The agent answers and greets you.
+Call the number. Twilio plays the AI disclosure, then the agent answers and greets the caller.
 
 ## 6. Check the audit log
 

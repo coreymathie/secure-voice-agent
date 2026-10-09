@@ -1,5 +1,7 @@
 # PCI: payment links and keypad capture
 
+This document describes how the design reduces PCI DSS scope: where cardholder data is allowed to flow, the boundary that keeps it out of the voice system, the suppression flags that enforce that boundary, and what has and has not been exercised. The control objective is that card data never enters the agent, its transcripts, its logs or its backends.
+
 Two ways to take a payment on a call, chosen with `PAYMENT_MODE`:
 
 | Mode | How the card is entered | Where card data goes | Default |
@@ -9,7 +11,7 @@ Two ways to take a payment on a call, chosen with `PAYMENT_MODE`:
 
 Both modes go through the same `take_payment` tool, so the same controls apply first: allow-list, social-engineering score, the account-takeover rule, step-up verification, per-call caps (the keypad start counts toward them), velocity, and the handler's amount limit (`MAX_PAYMENT_USD`).
 
-This page describes the design and what the code does. It is **not** a PCI DSS assessment. This repo has not been assessed, and scope depends on the whole deployment; have a QSA review yours.
+This document describes the design and what the code does. It is **not** a PCI DSS assessment. This repository has not been assessed, and scope depends on the whole deployment; a QSA should review each deployment.
 
 ## Cardholder-data boundary (keypad mode)
 
@@ -22,7 +24,7 @@ This page describes the design and what the code does. It is **not** a PCI DSS a
                                                          │ action callback: Result, PaymentConfirmationCode
                                                          │ (masked card fields in the callback are ignored)
                                                          ▼
- ┌─────────────────────────── this repo (intended to stay out of CHD flow) ─────────────────────────────────────┐
+ ┌─────────────────────────── this system (intended to stay out of CHD flow) ────────────────────────────────────┐
  │                                                                                                               │
  │  voice process (Pipecat)            keypad_payment Lambda                 twilio_pay_result Lambda            │
  │  ─ take_payment → gate, step-up,    ─ validate amount + call SID          ─ verify Twilio signature           │
@@ -58,7 +60,7 @@ Because the media stream really ends during `<Pay>`, the guard is defense in dep
 ## What is real and what is simulated
 
 - **Real code, tested here:** TwiML generation (attribute names checked against the Twilio helper library's own `<Pay>` output in `test_pay_twiml_attribute_names_match_the_twilio_helper_library`), both Lambdas' validation, ordering, and fail-closed behavior, the capture guard (driven with real Pipecat frames), and carrying call state across the hop through `bot.run_bot`.
-- **Simulated:** every Twilio REST call (recording pause/resume, call redirect) uses a stand-in client in tests and evals; the browser demo builds the real TwiML and flags but redirects nothing. **Twilio `<Pay>`, a Pay Connector, and a real card capture have not been run from this repo.**
+- **Simulated:** every Twilio REST call (recording pause/resume, call redirect) uses a stand-in client in tests and evals; the browser console builds the real TwiML and flags but redirects nothing. **Twilio `<Pay>`, a Pay Connector, and a real card capture have not been run from this repository.**
 - **Not implemented:** a shared store for parked call state (it is per process; if the resumed stream lands elsewhere, the call continues fresh and the audit log records `resume_state_missing`), keypad entry for step-up codes, and `<Pay>` tokenization (`tokenType`) for saving cards.
 
 ## Deployment requirements (keypad mode)

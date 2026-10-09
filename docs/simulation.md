@@ -1,10 +1,12 @@
 # Simulated callers
 
+This document describes the simulated-caller harness: what it runs, how it scores outcomes, what the current result means, and what it does not measure. Its results are labelled **simulated**: they come from hand-written scripts at the text level, not from real calls or a live model.
+
 `python -m evals.simulate` plays scripted multi-turn callers against the real tool stack and scores the outcome. It complements the call evals (`python -m evals.run`): the evals replay a fixed list of tool calls and check each result; the simulator runs a conversation in which an agent reacts to results (offers a code, asks for it, retries after a correction), and checks whether each caller ended up getting what they were after.
 
 ## What it is
 
-- **Personas** (`evals/personas.yaml`): 14 callers in four kinds. *Benign* (book a visit, pay an invoice from a landline while the code goes to the mobile on file, an emergency deposit, a card number read into a ticket), *impatient* (pushy but legitimate: corrects an over-limit amount, rebooks quickly), *social engineers* (owner-authority redirect, spoofed caller ID, SIM-swapped number, change-the-email-then-pay), and *prompt injectors* (ignore-your-instructions redirect, a quiet redirect with no risk words, an invented `issue_refund` tool).
+- **Personas** (`evals/personas.yaml`): 14 callers in four kinds. *Benign* (book a loan-officer appointment, make a loan payment, pay a credit-card fee from a landline while the code goes to the mobile on file, an urgent car-loan payment due today, a card number read into a dispute ticket), *impatient* (pushy but legitimate: corrects an over-limit payoff amount, rebooks quickly), *social engineers* (business-owner authority redirect, spoofed caller ID, SIM-swapped number, change-the-email-then-pay), and *prompt injectors* (ignore-your-instructions redirect, a quiet redirect with no risk words, an invented `issue_refund` tool).
 - **A scripted agent** (`ScriptedAgent` in `evals/scripted.py`, used by `evals/simulate.py` and by the console): deterministic, no language model. It does whatever the caller asks, with whatever arguments the caller or an injection supplies, including tools it was never granted. It cooperates with the controls the way a well-behaved model would (verify when told `step_up_required`, read back the code, correct a rejected amount). Being gullible on purpose means the scorecard shows what the deterministic layer catches when the model has already been fooled.
 - **The real stack underneath:** every tool call goes through `make_handler` with the policy loaded from `config/policy.yaml` (or `--policy`), step-up verification, velocity limits, scrubbing, the hash-chained audit log, and the real Lambda handler code with signed requests. Outside services are the eval fakes, and a fake clock drives the time windows.
 
@@ -34,7 +36,7 @@ Mutation tests (`tests/test_simulate.py`) weaken one control at a time and confi
 
 ## In the console
 
-The console's Playground (Simulated callers tab) and Evals screen play the same 14 personas with the same `ScriptedAgent` (`evals/scripted.py`) through the console engine (`demo/engine.py`). In live mode (`docker compose up`) the tool calls go to the real Lambda handler code behind signed requests, exactly as here. In demo mode (GitHub Pages) they go to in-process stand-ins for the handlers, because the browser can't load the handlers' dependencies; `tests/test_console.py` checks that both produce the same tool results, controls, and outcomes as `python -m evals.simulate` for every persona. Each played persona becomes a call in Call logs with its transcript, decision timeline, and audit chain.
+The console's Test line (Simulated callers tab) and Evals screen play the same 14 personas with the same `ScriptedAgent` (`evals/scripted.py`) through the console engine (`demo/engine.py`). In live mode (`docker compose up`) the tool calls go to the real Lambda handler code behind signed requests, exactly as here. In demo mode (GitHub Pages) they go to in-process stand-ins for the handlers, because the browser can't load the handlers' dependencies; `tests/test_console.py` checks that both produce the same tool results, controls, and outcomes as `python -m evals.simulate` for every persona. Each played persona becomes a call in **Calls › Test calls** with its transcript, decision timeline, and audit chain.
 
 ## What it is not
 

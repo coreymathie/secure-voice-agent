@@ -1,16 +1,12 @@
 # ADR 0004: Payments by link texted to the calling number, not card capture by voice or keypad
 
-- Status: accepted. Keypad capture was added in 0.6.0 as an opt-in alternative (`PAYMENT_MODE=keypad`, `docs/pci.md`); links remain the default.
-- Date: 2026-10
-- Code: `src/handlers/take_payment.py`, `make_handler()` in `src/agent/tools.py`
+- **Status:** accepted. Keypad capture was added in 0.6.0 as an opt-in alternative (`PAYMENT_MODE=keypad`, [`docs/pci.md`](../pci.md)); links remain the default.
+- **Date:** 2026-10
+- **Code:** `src/handlers/take_payment.py`, `make_handler()` in `src/agent/tools.py`
 
 ## Context
 
-A caller wants to pay during the call. Options:
-
-1. **Read the card number aloud to the agent.** The PAN lands in call audio, the speech-to-text output, the LLM provider's logs, and anything else that sees the transcript. Every one of those systems is then in PCI DSS scope.
-2. **Keypad (DTMF) capture.** The caller types the card on the keypad. Done properly (a PCI-compliant capture service that masks the tones and keeps them out of the media stream to the agent), the agent never sees the digits. It needs a provider feature and careful call-flow design.
-3. **A hosted payment link sent by SMS.** The card is entered on the payment processor's page. The agent only knows that a link was created.
+A caller wants to pay during the call. The design goal is PCI DSS scope reduction: cardholder data should never enter the voice system, and the destination of any payment request must not be steerable by the caller or the model. The options are listed under Alternatives considered.
 
 ## Decision
 
@@ -23,8 +19,19 @@ A caller wants to pay during the call. Options:
 
 ## Consequences
 
-- Positive: card data stays with the payment processor. The voice system's PCI exposure is reduced to not *accidentally* receiving card data (see the PCI notes in `docs/controls.md`). This is scope reduction, not a compliance certification.
-- Positive: binding the link to the calling number defeats "text it to my assistant instead" at the code level, independent of the model.
-- Negative: caller ID can be spoofed. A spoofed number receives nothing useful (the link goes to the real owner of that number), but the binding is not authentication. Since 0.6.0, `take_payment` also requires step-up verification (a one-time code to the phone on file; `docs/auth.md`).
-- Negative: the caller needs a phone that can receive SMS and open a link. Keypad capture through Twilio `<Pay>` is the alternative (0.6.0, `docs/pci.md`).
-- Negative: anyone who can call the `take_payment` Lambda directly can choose `customer_phone`; see ADR 0003 on endpoint authentication.
+**Positive**
+
+- Card data stays with the payment processor. The voice system's PCI exposure is reduced to not *accidentally* receiving card data (see the PCI notes in [`docs/controls.md`](../controls.md#pci-dss-scope-reduction-notes)). This is scope reduction, not a compliance certification.
+- Binding the link to the calling number defeats "text it to my assistant instead" at the code level, independent of the model.
+
+**Negative**
+
+- Caller ID can be spoofed. A spoofed number receives nothing useful (the link goes to the real owner of that number), but the binding is not authentication. Since 0.6.0, `take_payment` also requires step-up verification (a one-time code to the phone on file; [`docs/auth.md`](../auth.md)).
+- The caller needs a phone that can receive SMS and open a link. Keypad capture through Twilio `<Pay>` is the alternative (0.6.0, [`docs/pci.md`](../pci.md)).
+- Anyone who can call the `take_payment` Lambda directly can choose `customer_phone`; see ADR 0003 on endpoint authentication (HMAC-signed requests since 0.5.0).
+
+## Alternatives considered
+
+1. **Read the card number aloud to the agent.** The PAN lands in call audio, the speech-to-text output, the LLM provider's logs, and anything else that sees the transcript. Every one of those systems is then in PCI DSS scope. Rejected.
+2. **Keypad (DTMF) capture.** The caller types the card on the keypad. Done properly (a PCI-compliant capture service that masks the tones and keeps them out of the media stream to the agent), the agent never sees the digits. It needs a provider feature and careful call-flow design. Deferred, then added in 0.6.0 as an opt-in mode.
+3. **A hosted payment link sent by SMS.** The card is entered on the payment processor's page. The agent only knows that a link was created. Chosen as the default.

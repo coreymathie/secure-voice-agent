@@ -1,6 +1,6 @@
 # Policy as code
 
-The rules the policy gate, velocity limits, and step-up verification enforce live in one reviewed file: [`config/policy.yaml`](../config/policy.yaml). Changing what the agent may do is a pull request against that file, with a validator and the full call-eval suite as checks.
+This document describes the governance workflow for the agent's authority. The rules the policy gate, velocity limits, and step-up verification enforce live in one reviewed file: [`config/policy.yaml`](../config/policy.yaml). Changing what the agent may do is a pull request against that file, with a validator and the full call-eval suite as checks, which separates the people who propose a change from the evidence that approves it.
 
 ## What the file holds
 
@@ -43,8 +43,8 @@ CI runs the validator, the tests, and the evals on every push. The evals always 
 
 ## Parity with the code defaults
 
-The code keeps its own defaults (`TOOL_POLICIES`, `SIGNALS`, `PolicyConfig()`, `DEFAULT_RULES`, `StepUpConfig()`), because the browser demo runs `policy_gate.py` under Pyodide without the YAML loader. `tests/test_policy_config.py` proves the shipped file and those defaults are identical field by field, pattern by pattern, and that both make the same decision for every tool across a set of caller turns. Change one without the other and the test fails.
+The code keeps its own defaults (`TOOL_POLICIES`, `SIGNALS`, `PolicyConfig()`, `DEFAULT_RULES`, `StepUpConfig()`), because the browser console runs `policy_gate.py` under Pyodide without the YAML loader. `tests/test_policy_config.py` proves the shipped file and those defaults are identical field by field, pattern by pattern, and that both make the same decision for every tool across a set of caller turns. Change one without the other and the test fails.
 
 ## What it isn't
 
-There is no separate policy engine (OPA, Cedar): the file configures the existing deterministic checks rather than expressing arbitrary rules. Approval records (who reviewed which change) come from your version-control platform's review settings, not from this repo.
+There is no separate policy engine (OPA, Cedar): the file configures the existing deterministic checks rather than expressing arbitrary rules. Approval records (who reviewed which change) come from the version-control platform's review settings, not from this repository.
