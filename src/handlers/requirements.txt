@@ -1,5 +1,5 @@
 # Packaged by `sam build` into every Lambda in this folder. boto3 ships with the runtime.
-twilio>=9.0.0
+twilio>=9.11.2
 httpx>=0.27.0
 stripe>=9.0.0
 zenpy>=2.0.46
