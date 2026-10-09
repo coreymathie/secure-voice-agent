@@ -15,7 +15,7 @@
 | **Architecture** | Twilio → one long-lived Pipecat worker per call (Fly.io or ECS) → safeguard layer → HMAC-signed, idempotent tool handlers on AWS Lambda + DynamoDB. |
 | **Key decisions** | Safeguards in code, not prompts or a judge model; provider-independent (speech-to-speech default, cascaded as a swap); payment links pinned to the calling number. [4 ADRs](#key-decisions-and-trade-offs). |
 | **Controls** | Default-deny allow-list, social-engineering scoring, step-up verification to the phone on file, per-call caps, velocity limits, identifier scrubbing, hash-chained audit, idempotency, signed requests. Policy as code in [`config/policy.yaml`](config/policy.yaml). |
-| **Evidence** | 417 pytest tests, including 22 mutation tests that switch controls off; 31/31 call evals; 14 simulated callers (7/7 benign served, 7/7 adversarial stopped, 0 benign blocked; scripted and text-level, not a measured rate on real calls); a 138-check browser smoke test of the console. |
+| **Evidence** | 458 pytest tests, including 22 mutation tests that switch controls off; 31/31 call evals; 14 simulated callers (7/7 benign served, 7/7 adversarial stopped, 0 benign blocked; scripted and text-level, not a measured rate on real calls); a 145-check browser smoke test of the console. |
 | **Out of scope** | No latency or cost figures are published (none have been measured here); no live model or synthetic speech drives the evals; Twilio `<Pay>`, Twilio Verify and SIM-swap data sources are not exercised; nothing here is a compliance certification. |
 | **Try it** | [Live console](https://coreymathie.github.io/secure-voice-agent/demo/): the repo's real safeguard code running in the browser through Pyodide. No backend, no keys. |
 
