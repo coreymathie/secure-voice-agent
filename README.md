@@ -5,49 +5,31 @@
 ![pipecat](https://img.shields.io/badge/pipecat-1.x-purple)
 ![license](https://img.shields.io/badge/license-MIT-green)
 
-**A phone AI agent that can take payments and write to business systems, with deterministic controls between the model and every action it takes, and a console to test, inspect, and tune them.**
+**A reference architecture for a phone AI agent that takes payments and writes to business systems while talking to untrusted callers. The risk it addresses is a model that can be talked into moving money or spreading sensitive data, which prompt rules alone do not prevent. The approach is a deterministic control layer between the model and every action: plain, tested code decides whether a tool call runs, and every decision is audited and replayable.**
 
-### ▶ [Open the live console](https://coreymathie.github.io/secure-voice-agent/demo/)
+## At a glance
 
-[![The Secure Voice Agent console: business impact for a sample credit union, with calls answered, containment, payments collected, fraud attempts stopped and cost avoided](docs/img/console.png)](https://coreymathie.github.io/secure-voice-agent/demo/)
-
-[![A call in the console: transcript replay with the safeguards that stepped in, the summary, and what the agent did](docs/img/console-call.png)](https://coreymathie.github.io/secure-voice-agent/demo/)
-
-The console is what a credit union's contact-center team would use: a dashboard, a searchable history of every call with its transcript and the safeguards that stepped in, a test line to try to fool the agent, the policy that governs it, and the safety tests behind it. The interactive screens run this repo's real `make_handler()`, `src/safeguards/`, and `config/policy.yaml` loader in your browser through Pyodide: talk to the agent as a caller, watch each action pass or stop at the policy gate, step-up verification, velocity limits, and PII scrubbing, tamper with a call's audit log, edit the policy and re-run, and check the measured evals. No backend, no LLM, no network calls after load; outside services are simulated and labelled as such. Engineers can switch to the **Technical** view (or open [`?view=technical`](https://coreymathie.github.io/secure-voice-agent/demo/?view=technical)) to see code paths, hashes and raw records alongside every screen.
-
-## Console
-
-The console opens on a sample business so the agent can be judged at the scale it would run at: **Cypress Harbor Credit Union**, a *fictional* credit union (92,400 members, $1.4B in assets, 11 branches, 38 member-services agents). Its 90 days of contact-center data and today's 320 most recent calls (members, transcripts, outcomes, the safeguards on each call; about one in six in Spanish) come from [`scripts/generate_sample_company.py`](scripts/generate_sample_company.py) and [`scripts/sample_calls.py`](scripts/sample_calls.py), seeded and checked in CI. The workspace is marked as a sample and fictional; phone numbers are in the 555-01xx range and emails use example.com. Dates are shown relative to today. Measured results are labelled **Measured**, and calls you place yourself are kept apart as **Test calls**. The simulated callers and guided scenarios use the same credit-union setting.
-
-Navigation follows the patterns of modern operations consoles: screens grouped by job (Monitor, Try it, Govern, Configure) with sub-pages in the sidebar, breadcrumbs on every screen, a command palette (<kbd>Ctrl</kbd>/<kbd>⌘</kbd> <kbd>K</kbd> or <kbd>/</kbd>) that jumps to any screen, action, or member call, `g` + letter shortcuts (<kbd>?</kbd> lists them), a collapsible sidebar, an opt-in guided tour that opens each screen it describes, and light and dark themes. The overview and call history load from static files, so they work even where the Pyodide download is blocked.
-
-| Screen | What it shows |
+| | |
 |---|---|
-| **Overview › Business impact** | For the sample credit union over 7, 30 or 90 days: calls answered, resolved without a transfer, average call length, payments collected, fraud attempts stopped, verified-before-money-moved rate, member satisfaction and member-services cost avoided (with its stated per-call cost assumptions), each against the previous period; daily volume by outcome; what members call about and how often the agent resolves each; fraud attempts by type; why calls went to a person; compliance checks; recent activity |
-| **Overview › Test session** | Calls placed from this browser: actions allowed / blocked / stepped up / handed off, payments by link vs keypad, intact audit chains, measured eval pass rates; charts of decisions by tool and controls that fired |
-| **Calls** | The sample credit union's recent calls: search by member or anything said, filter by reason, outcome, fraud stopped, Spanish or low satisfaction, page through, export to CSV. Each call opens on its own page: transcript replay with the safeguards that stepped in marked on the timeline, an AI summary, what the agent did, verification, sentiment and satisfaction |
-| **Calls › Test calls** | Calls placed in the test line, with search and filters; a drawer with each action's decision timeline and the hash-chained audit log (verify, tamper, undo) |
-| **Test line** | A test call: AI disclosure and recording consent first, then typed caller turns that a scripted agent turns into tool calls through the real safeguards; step-up codes on a simulated phone; keypad payments; 12 guided scenarios; the 14 simulated callers from `evals/personas.yaml` |
-| **Policies** | Edit `config/policy.yaml`, validate it with the repo's own loader, apply it, and re-run a call under the shipped and the edited policy side by side |
-| **Evals** | 31 call evals, 22 mutation tests, and the simulated-caller scorecard, exported from the repo's own scripts |
-| **Settings** | Voice providers (OpenAI Realtime, Claude cascade, Gemini Live) as configuration, tool endpoints, request-signing status and self-test; secrets are never displayed |
+| **Problem** | An agent on a public phone number holds tools that send payment links and write to the calendar, ticketing and CRM. Callers apply social engineering and read card numbers and SSNs aloud. |
+| **Architecture** | Twilio → one long-lived Pipecat worker per call (Fly.io or ECS) → safeguard layer → HMAC-signed, idempotent tool handlers on AWS Lambda + DynamoDB. |
+| **Key decisions** | Safeguards in code, not prompts or a judge model; provider-independent (speech-to-speech default, cascaded as a swap); payment links pinned to the calling number. [4 ADRs](#key-decisions). |
+| **Controls** | Default-deny allow-list, social-engineering scoring, step-up verification to the phone on file, per-call caps, velocity limits, identifier scrubbing, hash-chained audit, idempotency, signed requests. Policy as code in [`config/policy.yaml`](config/policy.yaml). |
+| **Evidence** | 417 pytest tests, including 22 mutation tests that switch controls off; 31/31 call evals; 14 simulated callers (7/7 benign served, 7/7 adversarial stopped, 0 benign blocked). |
+| **Try it** | [Live console](https://coreymathie.github.io/secure-voice-agent/demo/): the repo's real safeguard code running in the browser through Pyodide. No backend, no keys. |
 
-**Run it live:** `docker compose up` → http://localhost:8090/console/ (or `pip install -r requirements-console.txt && python -m src.console_server`). The same console then talks to a local server that runs the real Lambda handler code behind HMAC-signed requests, with a signing secret generated at startup and the eval fakes standing in for Stripe, Twilio, Google Calendar, Zendesk, and the CRM. No API keys needed. It still makes no phone calls: real calls need a Twilio number and the deployment below. Details, endpoints, and what is simulated in each mode: [`docs/console.md`](docs/console.md).
+**Stack:** Pipecat 1.x · Twilio Media Streams · OpenAI Realtime (or Claude + Deepgram + ElevenLabs, or Gemini Live) · AWS Lambda + API Gateway + DynamoDB · Fly.io · OpenTelemetry
 
 ---
 
 ## Problem and stakes
 
-A voice agent that answers a real phone number is talking to untrusted strangers and holding tools that move money (payment links), send messages, and write into the calendar, ticketing system, and CRM. Two things go wrong in practice:
+A voice agent that answers a real phone number talks to untrusted strangers while holding tools that move money (payment links), send messages, and write into the calendar, ticketing system, and CRM. Two things go wrong in practice:
 
 - **The model gets talked into things.** Urgency ("right now"), authority ("I'm the owner"), "you don't need to verify me", "text it to my assistant's number instead". Prompt rules don't hold up against a determined caller.
 - **Sensitive data spreads.** Callers read card numbers and SSNs aloud, into ticket bodies and lead notes, and from there into logs and third-party systems.
 
-This repo puts a layer of plain, testable code between the model and the tools: a **policy gate** (default-deny allow-list, social-engineering risk scoring, per-call blast-radius caps), **step-up verification** (a one-time code to the phone on file before payments or contact changes; caller ID is never identity), **velocity limits**, **identifier scrubbing**, a **hash-chained audit log**, and **idempotency**. These are patterns from fintech fraud and dispute operations, applied to an AI agent. Every control has a test, and the evals fail if any control is switched off.
-
-**Stack:** Pipecat 1.x · Twilio Media Streams · OpenAI Realtime (or Claude + Deepgram + ElevenLabs, or Gemini Live) · AWS Lambda + API Gateway + DynamoDB · Fly.io · OpenTelemetry
-
----
+The design response is a layer of plain, testable code between the model and the tools: a **policy gate** (default-deny allow-list, social-engineering risk scoring, per-call blast-radius caps), **step-up verification** (a one-time code to the phone on file before payments or contact changes; caller ID is never identity), **velocity limits**, **identifier scrubbing**, a **hash-chained audit log**, and **idempotency**. These are patterns from fintech fraud and dispute operations, applied to an AI agent. Every control has a test, and the evals fail if any control is switched off.
 
 ## Architecture
 
@@ -96,20 +78,20 @@ This repo puts a layer of plain, testable code between the model and the tools: 
    every decision ─▶ hash-chained audit log (redacted)   ·   OpenTelemetry span events (opt-in)
 ```
 
-A phone call is a long-lived WebSocket, so the voice process runs on Fly.io or ECS. The webhook and tool handlers are short and stateless, so they run on Lambda. More: [`docs/architecture.md`](docs/architecture.md).
+The runtime split follows the workload. A phone call is a long-lived WebSocket, so the voice process runs on Fly.io or ECS. The webhook and tool handlers are short and stateless, so they run on Lambda. Every tool call, from any provider and under any name, passes through the same safeguard layer before anything executes. More: [`docs/architecture.md`](docs/architecture.md).
 
 ## Key decisions
 
-| ADR | Decision |
-|---|---|
-| [0001](docs/adr/0001-speech-to-speech-vs-cascaded.md) | Speech-to-speech by default, cascaded STT→LLM→TTS as a one-variable swap; safeguards are provider-independent |
-| [0002](docs/adr/0002-deterministic-safeguard-layer.md) | A deterministic safeguard layer outside the model instead of prompt rules or a judge model |
-| [0003](docs/adr/0003-lambda-tools-long-lived-call-worker.md) | Tools on Lambda, one long-lived worker per call, with HMAC-signed tool requests |
-| [0004](docs/adr/0004-pay-by-link-bound-to-caller.md) | Payment links texted to the calling number, not card capture by voice; keypad capture through Twilio `<Pay>` as an opt-in alternative (0.6.0) |
+| ADR | Decision | Trade-off |
+|---|---|---|
+| [0001](docs/adr/0001-speech-to-speech-vs-cascaded.md) | Speech-to-speech by default, cascaded STT→LLM→TTS as a one-variable swap; safeguards are provider-independent | In speech-to-speech mode the caller's transcript can arrive after the model decides to call a tool, so a risky sentence in that turn may not be scored yet (caps and velocity still apply). The cascaded path has three vendors to secure and contract with instead of one. |
+| [0002](docs/adr/0002-deterministic-safeguard-layer.md) | A deterministic safeguard layer outside the model instead of prompt rules or a judge model | Regex scoring has false negatives (paraphrase, other languages) and false positives (a caller who really is the owner). The threshold needs tuning against real call data; a benign-urgency eval guards against false positives. |
+| [0003](docs/adr/0003-lambda-tools-long-lived-call-worker.md) | Tools on Lambda, one long-lived worker per call, with HMAC-signed tool requests | Two deploy targets to operate. The tool routes are public HTTPS endpoints; HMAC signing mitigates this, but a shared secret is not workload identity (IAM/SigV4 or private networking is the next step). |
+| [0004](docs/adr/0004-pay-by-link-bound-to-caller.md) | Payment links texted to the calling number, not card capture by voice; keypad capture through Twilio `<Pay>` as an opt-in alternative (0.6.0) | Caller ID can be spoofed, so binding the link to the calling number is not authentication (step-up verification is also required since 0.6.0). The caller needs a phone that can receive SMS and open a link. |
 
 ## Controls and governance
 
-Tool-call controls run in `make_handler()` (`src/agent/tools.py`) on every tool call: destination pin, policy gate (allow-list, risk score, takeover rule, step-up, caps), velocity, scrub and audit, then the idempotent, signed request. Call-level controls run around the conversation: disclosure and consent before the agent connects, call limits while it runs.
+Tool-call controls run in `make_handler()` (`src/agent/tools.py`) on every tool call, in a fixed order: destination pin, policy gate (allow-list, risk score, takeover rule, step-up, caps), velocity, scrub and audit, then the idempotent, signed request. Call-level controls run around the conversation: disclosure and consent before the agent connects, call limits while it runs.
 
 | Control | What it does | Code | Evidence |
 |---|---|---|---|
@@ -130,16 +112,18 @@ Tool-call controls run in `make_handler()` (`src/agent/tools.py`) on every tool 
 | **Honest failure handling** | Rejections return the handler's reason; outages return a generic message (details only in the audit log) and don't use up the caller's attempts. | `tools.py` | evals `stripe-outage-retry`, `over-limit-then-corrected` |
 | **Guidance, not leakage** | Refusals tell the model what to say ("a team member will follow up") without revealing thresholds or which phrases were flagged. | `policy_gate.py` | `test_guidance_never_reveals_detection_details` |
 
-**Policy as code:** tool tiers, caps, risk signals and weights, the threshold, step-up settings, and velocity rules live in one reviewed file, [`config/policy.yaml`](config/policy.yaml). It is schema-validated at startup and an invalid file stops the process (fail closed); the evals run against it, so a weakened policy fails CI; a test proves it matches the code defaults. `POLICY_*` environment variables still apply on top and can only narrow the allow-list. Workflow: [`docs/policy.md`](docs/policy.md).
+**Policy as code:** tool tiers, caps, risk signals and weights, the threshold, step-up settings, and velocity rules live in one reviewed file, [`config/policy.yaml`](config/policy.yaml). It is schema-validated at startup, and an invalid file stops the process (fail closed). The evals run against it, so a weakened policy fails CI, and a test proves it matches the code defaults. `POLICY_*` environment variables still apply on top and can only narrow the allow-list.
+
+Governance documents:
 
 - **Policy file and review workflow:** [`docs/policy.md`](docs/policy.md).
 - **Payments and PCI:** [`docs/pci.md`](docs/pci.md): pay-by-link vs. keypad capture, the cardholder-data boundary, suppression flags, and what is simulated.
 - **Step-up verification:** [`docs/auth.md`](docs/auth.md): flow, NIST SP 800-63B mapping, and the risk acceptance for SMS/voice one-time codes (a restricted authenticator).
 - **Threat model:** [`docs/threat-model.md`](docs/threat-model.md), STRIDE plus the OWASP Top 10 for Agentic Applications (ASI01–ASI10) and the OWASP Top 10 for LLM Applications 2025. Each threat maps to a control in code, a test, and the residual risk.
-- **Framework mapping:** [`docs/controls.md`](docs/controls.md), the NIST AI RMF functions, NIST AI 600-1 risk categories, PCI DSS scope-reduction notes, and the EU AI Act Article 50 disclosure requirement.
+- **Framework mapping:** [`docs/controls.md`](docs/controls.md), mapped to the NIST AI RMF functions, NIST AI 600-1 risk categories, PCI DSS scope-reduction notes, and the EU AI Act Article 50 disclosure requirement.
 - **Deployment notes:** [`docs/compliance.md`](docs/compliance.md).
 
-## Quality
+## Quality (measured)
 
 ```bash
 ruff check . && ruff format --check . && pytest -q   # 417 tests (10 are skipped if fakeredis is not installed)
@@ -148,12 +132,12 @@ python -m evals.simulate                              # 14 scripted callers, mul
 python -m evals.run                                   # 31/31 scenarios
 ```
 
-- **31 call-eval scenarios** ([`evals/scenarios.yaml`](evals/scenarios.yaml)): 13 from 0.4.0 (payment bursts, slow-drip payments, replayed requests, provider outages, a card number read into a ticket, a prompt-injected redirect of a payment link, and more), 5 for the policy gate (social-engineering handoff, a benign urgent caller who must *not* be blocked, the per-call USD ceiling, a backend tool the agent was never granted, the per-call action ceiling), and 5 for step-up verification (spoofed caller ID, verify-then-pay, code guessing and lockout, a SIM-swap signal, change-the-email-then-pay), 3 for keypad payments (recording paused before capture, capture refused when it can't be paused, amount limit in keypad mode), and 5 for call start (the AI disclosure comes first; declined, silent, and granted recording consent; a one-party-state notice). Call-start scenarios run the real webhook Lambdas with Twilio-signed requests.
-- The harness runs each scenario through the real stack: `make_handler`, the policy gate, velocity limits, scrubbing, the audit log, and the actual Lambda handler code with its idempotency layer. Only Stripe, Twilio SMS and Verify, Google Calendar, Zendesk, and the CRM are faked, and the fakes enforce the real services' rules where it matters. Step-up runs the real `StepUpSession` against an in-memory CRM record and a simulated verifier. A fake clock drives the time windows.
+- **31 call-eval scenarios** ([`evals/scenarios.yaml`](evals/scenarios.yaml)): 13 from 0.4.0 (payment bursts, slow-drip payments, replayed requests, provider outages, a card number read into a ticket, a prompt-injected redirect of a payment link, and more), 5 for the policy gate (social-engineering handoff, a benign urgent caller who must *not* be blocked, the per-call USD ceiling, a backend tool the agent was never granted, the per-call action ceiling), 5 for step-up verification (spoofed caller ID, verify-then-pay, code guessing and lockout, a SIM-swap signal, change-the-email-then-pay), 3 for keypad payments (recording paused before capture, capture refused when it can't be paused, amount limit in keypad mode), and 5 for call start (the AI disclosure comes first; declined, silent, and granted recording consent; a one-party-state notice). Call-start scenarios run the real webhook Lambdas with Twilio-signed requests.
+- **Real stack, faked edges.** The harness runs each scenario through `make_handler`, the policy gate, velocity limits, scrubbing, the audit log, and the actual Lambda handler code with its idempotency layer. Only Stripe, Twilio SMS and Verify, Google Calendar, Zendesk, and the CRM are faked, and the fakes enforce the real services' rules where it matters. Step-up runs the real `StepUpSession` against an in-memory CRM record and a simulated verifier. A fake clock drives the time windows.
 - **417 pytest tests**, including **22 mutation tests**: 17 switch off one control at a time and confirm the evals fail (scrubbing, velocity, retry release, idempotency, the policy gate, risk scoring, per-call counters, an over-eager risk threshold, step-up, codes sent to caller ID, the lockout, the takeover rule, the SIM-swap hook, card capture without pausing the recording, recording without consent, silence treated as consent, and a missing AI disclosure), and 5 do the same for the simulator.
-- **Simulated callers** ([`docs/simulation.md`](docs/simulation.md)): 14 scripted multi-turn personas (benign, impatient, social engineers, prompt injectors) against the real stack with a deliberately gullible scripted agent (no LLM). Scored on task success, correct refusals, false-positive rate, and handoffs. Current run: 7/7 benign and impatient callers got what they came for, 7/7 adversarial callers were stopped, 0 benign callers blocked. That is 14 hand-written scripts, text-level only (no audio, no model); it is not a measured rate on real calls.
-- Mutation tests that weaken the *policy* do it the way a reviewer would: an edited copy of `config/policy.yaml` (lockout raised to 99 attempts, risk threshold lowered to 1) run through the evals, as `python -m evals.run --policy` does.
-- CI runs lint, format check, the policy validator, tests, evals, and the simulator on every push and publishes the scorecard to the job summary. It also fails if the console's committed eval results (`demo/data/evals.json`) are stale, and drives every console screen in headless Chromium in both modes (`scripts/demo_smoke.py --live`).
+- **Policy mutations** weaken the policy the way a reviewer would: an edited copy of `config/policy.yaml` (lockout raised to 99 attempts, risk threshold lowered to 1) run through the evals, as `python -m evals.run --policy` does.
+- **Simulated callers** ([`docs/simulation.md`](docs/simulation.md)): 14 scripted multi-turn personas (benign, impatient, social engineers, prompt injectors) against the real stack with a deliberately gullible scripted agent (no LLM). Scored on task success, correct refusals, false-positive rate, and handoffs. Current run: 7/7 benign and impatient callers got what they came for, 7/7 adversarial callers were stopped, 0 benign callers blocked. These are 14 hand-written scripts, text-level only (no audio, no model); this is not a measured rate on real calls.
+- **CI** runs lint, format check, the policy validator, tests, evals, and the simulator on every push and publishes the scorecard to the job summary. It also fails if the console's committed eval results (`demo/data/evals.json`) are stale, and drives every console screen in headless Chromium in both modes (`scripts/demo_smoke.py --live`).
 
 ```
 **31/31 scenarios passed**
@@ -169,15 +153,11 @@ python -m evals.run                                   # 31/31 scenarios
 | ...                                                                                                         |
 ```
 
-The evals replay the tool calls a model makes, and the simulator drives multi-turn conversations with a scripted agent; neither drives a live model with synthetic speech (that's on the roadmap).
-
-## Observability
-
-Set `OTEL_EXPORTER_OTLP_ENDPOINT` and Pipecat's OpenTelemetry tracing turns on: a `conversation` span per call (id = Twilio CallSid), `turn` spans with `turn.user_bot_latency_seconds`, and STT/LLM/TTS spans with time-to-first-byte. Every safeguard decision is added as a span event (`safeguard.policy`, `safeguard.velocity`, `safeguard.pii_scrubbed`, `safeguard.tool_result`) carrying codes and scores only, never caller text.
-
-`python -m evals.latency <exported traces>` computes p50/p95/p99 time-to-first-audio from OTLP JSON, Jaeger JSON, or Pipecat logs. **This repo publishes no latency or cost numbers**: none have been measured here, and they depend on provider, region, and network. Setup for Jaeger, Phoenix, and Langfuse, plus a privacy warning about transcript content in Pipecat's spans: [`docs/observability.md`](docs/observability.md).
+**Limits of this evidence:** the evals replay the tool calls a model makes, and the simulator drives multi-turn conversations with a scripted agent. Neither drives a live model with synthetic speech (that is on the roadmap).
 
 ## Failure modes
+
+Default posture: high-risk actions fail closed and hand off to a person, and lower-tier tools keep working. Exceptions, such as idempotency failing open when DynamoDB is unavailable, are called out in the table.
 
 | What happens | What the caller hears / what the system does |
 |---|---|
@@ -206,6 +186,37 @@ Set `OTEL_EXPORTER_OTLP_ENDPOINT` and Pipecat's OpenTelemetry tracing turns on: 
 | Speech-to-speech transcript lags the model | A risky sentence in the same turn as a tool call may not be scored yet; caps and velocity still apply (ADR 0001). |
 | The policy file is invalid (bad tier, unknown key, regex that doesn't compile, ...) | The voice process refuses to start and names each bad field. |
 | Someone calls the tool Lambdas directly | `401`: every tool request must carry an HMAC-SHA256 signature over timestamp, idempotency key and body (`TOOL_API_SECRET`). A captured request can't be altered, replayed under a new idempotency key, or replayed after 5 minutes. Handlers refuse all calls if the secret isn't configured. |
+
+## Observability
+
+Set `OTEL_EXPORTER_OTLP_ENDPOINT` and Pipecat's OpenTelemetry tracing turns on: a `conversation` span per call (id = Twilio CallSid), `turn` spans with `turn.user_bot_latency_seconds`, and STT/LLM/TTS spans with time-to-first-byte. Every safeguard decision is added as a span event (`safeguard.policy`, `safeguard.velocity`, `safeguard.pii_scrubbed`, `safeguard.tool_result`) carrying codes and scores only, never caller text.
+
+`python -m evals.latency <exported traces>` computes p50/p95/p99 time-to-first-audio from OTLP JSON, Jaeger JSON, or Pipecat logs. **This repo publishes no latency or cost numbers**: none have been measured here, and they depend on provider, region, and network. Setup for Jaeger, Phoenix, and Langfuse, plus a privacy warning about transcript content in Pipecat's spans: [`docs/observability.md`](docs/observability.md).
+
+## Console
+
+### ▶ [Open the live console](https://coreymathie.github.io/secure-voice-agent/demo/)
+
+The console exists to make the control layer inspectable. Its interactive screens run this repo's real `make_handler()`, `src/safeguards/`, and `config/policy.yaml` loader in the browser through Pyodide: talk to the agent as a caller, watch each action pass or stop at the policy gate, step-up verification, velocity limits, and PII scrubbing, tamper with a call's audit log, edit the policy and re-run, and check the measured evals. No backend, no LLM, no network calls after load; outside services are simulated and labelled as such. The **Technical** view ([`?view=technical`](https://coreymathie.github.io/secure-voice-agent/demo/?view=technical)) shows code paths, hashes and raw records alongside every screen.
+
+[![The Secure Voice Agent console: business impact for a sample credit union, with calls answered, containment, payments collected, fraud attempts stopped and cost avoided](docs/img/console.png)](https://coreymathie.github.io/secure-voice-agent/demo/)
+
+[![A call in the console: transcript replay with the safeguards that stepped in, the summary, and what the agent did](docs/img/console-call.png)](https://coreymathie.github.io/secure-voice-agent/demo/)
+
+It is framed as the console a credit union's contact-center team would use, on a *fictional* sample workspace (Cypress Harbor Credit Union). Its 90 days of contact-center data and 320 most recent calls (about one in six in Spanish) come from [`scripts/generate_sample_company.py`](scripts/generate_sample_company.py) and [`scripts/sample_calls.py`](scripts/sample_calls.py), seeded and checked in CI. No real personal data: phone numbers are in the 555-01xx range and emails use example.com. Measured results are labelled **Measured**, and calls you place yourself are kept apart as **Test calls**. The overview and call history load from static files, so they work even where the Pyodide download is blocked.
+
+| Screen | What it shows |
+|---|---|
+| **Overview › Business impact** | For the sample credit union over 7, 30 or 90 days: calls answered, resolved without a transfer, average call length, payments collected, fraud attempts stopped, verified-before-money-moved rate, member satisfaction and member-services cost avoided (with its stated per-call cost assumptions), each against the previous period; daily volume by outcome; what members call about and how often the agent resolves each; fraud attempts by type; why calls went to a person; compliance checks; recent activity |
+| **Overview › Test session** | Calls placed from this browser: actions allowed / blocked / stepped up / handed off, payments by link vs keypad, intact audit chains, measured eval pass rates; charts of decisions by tool and controls that fired |
+| **Calls** | The sample credit union's recent calls: search by member or anything said, filter by reason, outcome, fraud stopped, Spanish or low satisfaction, page through, export to CSV. Each call opens on its own page: transcript replay with the safeguards that stepped in marked on the timeline, an AI summary, what the agent did, verification, sentiment and satisfaction |
+| **Calls › Test calls** | Calls placed in the test line, with search and filters; a drawer with each action's decision timeline and the hash-chained audit log (verify, tamper, undo) |
+| **Test line** | A test call: AI disclosure and recording consent first, then typed caller turns that a scripted agent turns into tool calls through the real safeguards; step-up codes on a simulated phone; keypad payments; 12 guided scenarios; the 14 simulated callers from `evals/personas.yaml` |
+| **Policies** | Edit `config/policy.yaml`, validate it with the repo's own loader, apply it, and re-run a call under the shipped and the edited policy side by side |
+| **Evals** | 31 call evals, 22 mutation tests, and the simulated-caller scorecard, exported from the repo's own scripts |
+| **Settings** | Voice providers (OpenAI Realtime, Claude cascade, Gemini Live) as configuration, tool endpoints, request-signing status and self-test; secrets are never displayed |
+
+**Live mode:** `docker compose up` → http://localhost:8090/console/ (or `pip install -r requirements-console.txt && python -m src.console_server`). The same console then talks to a local server that runs the real Lambda handler code behind HMAC-signed requests, with a signing secret generated at startup and the eval fakes standing in for Stripe, Twilio, Google Calendar, Zendesk, and the CRM. No API keys needed. It still makes no phone calls: real calls need a Twilio number and the deployment below. Modes, endpoints, navigation, and what is simulated in each mode: [`docs/console.md`](docs/console.md).
 
 ## Quickstart (local)
 
@@ -277,6 +288,10 @@ Next:
 - **Audio-level simulated callers:** the text-level simulator exists (`python -m evals.simulate`); next is driving the live pipeline with synthetic caller speech and a real model to measure end-to-end behavior and time-to-first-audio ([`docs/simulation.md`](docs/simulation.md) describes the seams).
 
 Also open: workload identity for the tool API (IAM/SigV4 instead of a shared secret), anchor the audit chain in WORM storage, a per-call model-spend budget, a shared store for call state parked across Twilio `<Pay>`, keypad entry for one-time codes, and a review queue for handoffs.
+
+## Author
+
+Designed and built by Corey Mathie, AI Solutions Architect.
 
 ## License
 
