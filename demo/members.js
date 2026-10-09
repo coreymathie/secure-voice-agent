@@ -22,6 +22,7 @@ const FLAG_FILTERS = [
   ["Payment", "Payment taken"],
   ["verify-failed", "Verification not completed"],
   ["Card number scrubbed", "Card number scrubbed"],
+  ["Verification lockout", "Verification lockout"],
   ["es", "Spanish"],
   ["low-csat", "Low satisfaction (1–2)"],
 ];
@@ -248,6 +249,7 @@ export async function renderMemberCall(view, id, {go, crumbsHome}) {
             <div><dt>Sentiment</dt><dd><span class="pill ${sentiment[0]}">${sentiment[1]}</span></dd></div>
             <div><dt>Satisfaction</dt><dd>${c.csat ? stars(c.csat) : '<span class="muted">No survey</span>'}</dd></div>
             <div><dt>Queue</dt><dd>${esc(c.queue)}</dd></div>
+            <div><dt>Recording</dt><dd>${c.recording === "declined" ? "Declined: audio not recorded" : "Consent given"}</dd></div>
           </dl>
           ${c.qa_tags.length ? `<div class="chips qa">${c.qa_tags.map((t) => `<span class="chip neutral">${esc(t)}</span>`).join("")}</div>` : ""}
         </section>
@@ -262,7 +264,7 @@ export async function renderMemberCall(view, id, {go, crumbsHome}) {
             <div><dt>Member number</dt><dd>•••• ${esc(c.member.member_no)}</dd></div>
             <div><dt>Member since</dt><dd>${esc(c.member.since)}</dd></div>
             <div><dt>Membership</dt><dd>${esc(c.member.segment)}</dd></div>
-            <div><dt>Calls today</dt><dd>${calls.filter((x) => x.member.member_no === c.member.member_no && x.member.name === c.member.name).length}</dd></div>
+            <div><dt>Calls that day</dt><dd>${calls.filter((x) => x.member.member_no === c.member.member_no && x.member.name === c.member.name).length}</dd></div>
           </dl>
         </section>
         <details class="card tech-only"><summary><b>Record</b> <span class="hint">risk score ${esc(c.risk_score)}${c.risk_signals.length ? ` · ${esc(c.risk_signals.join(", "))}` : ""} · ${esc(c.id)}</span></summary><pre>${esc(JSON.stringify({...c, transcript: `${c.transcript.length} turns`}, null, 2))}</pre></details>

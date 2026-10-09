@@ -13,8 +13,16 @@ from src.safeguards.audit_log import AuditLog
 
 MESSAGES = [
     {"role": "user", "content": summary.KICKOFF_MESSAGE},
-    {"role": "assistant", "content": "Thanks for calling Bright Roofing, how can I help?"},
-    {"role": "user", "content": [{"type": "text", "text": "I need a roof estimate. Email is dana@example.com"}]},
+    {"role": "assistant", "content": "Thanks for calling Cypress Harbor Credit Union, how can I help?"},
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "text",
+                "text": "I need a loan officer appointment about a home equity line. Email is dana@example.com",
+            }
+        ],
+    },
     {
         "role": "assistant",
         "content": None,
@@ -27,10 +35,10 @@ MESSAGES = [
 ]
 OUTCOMES = [{"tool": "book_meeting", "status": "booked"}]
 GOOD = {
-    "summary": "Dana called for a roof estimate and was booked for Tuesday at 2pm.",
-    "caller_intent": "roof estimate",
+    "summary": "Dana called about a home equity line and was booked with a loan officer for Tuesday at 2pm.",
+    "caller_intent": "home equity line appointment",
     "outcome": "resolved",
-    "follow_ups": ["Prepare estimate materials"],
+    "follow_ups": ["Prepare home equity application materials"],
     "sentiment": "positive",
 }
 
@@ -48,7 +56,7 @@ def _client(handler):
 def test_transcript_skips_kickoff_tools_and_provider_messages():
     turns = summary.transcript_from_messages(MESSAGES)
     assert [r for r, _ in turns] == ["assistant", "user", "assistant", "user"]
-    assert turns[1][1].startswith("I need a roof estimate")
+    assert turns[1][1].startswith("I need a loan officer appointment")
 
 
 async def test_anthropic_summary_is_forced_through_a_tool_and_sees_only_redacted_text(monkeypatch):
@@ -81,7 +89,9 @@ async def test_openai_summary_uses_strict_json_schema(monkeypatch):
 
     async with _client(handler) as client:
         result = await summary.summarize(summary.transcript_from_messages(MESSAGES), OUTCOMES, client)
-    assert result.generated_by == "openai:gpt-4.1-mini" and result.follow_ups == ["Prepare estimate materials"]
+    assert result.generated_by == "openai:gpt-4.1-mini" and result.follow_ups == [
+        "Prepare home equity application materials"
+    ]
     assert sent["response_format"]["json_schema"]["strict"] is True
 
 
@@ -164,7 +174,7 @@ BODY = {
     "call_sid": "CA1",
     "caller_phone": "+19545550101",
     **GOOD,
-    "summary": "Caller read card 4111 1111 1111 1111 aloud; booked an estimate.",
+    "summary": "Caller read card 4111 1111 1111 1111 aloud; booked a loan officer appointment.",
     "tools": OUTCOMES,
 }
 

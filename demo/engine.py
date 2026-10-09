@@ -74,8 +74,11 @@ from evals.scripted import (
     expectation,
     goal_achieved,
     metrics,
+    next_weekday,
     parse_personas,
+    resolve_dates,
 )
+from evals.scripted import today as scripted_today
 from src.agent import tools
 from src.agent.capture import CaptureState
 from src.agent.disclosure import on_call_start
@@ -84,8 +87,8 @@ from src.handlers.pay_twiml import build_pay_twiml, build_resume_twiml, parse_pa
 from src.safeguards.audit_log import AuditLog
 from src.safeguards.policy_gate import TOOL_POLICIES, CallPolicy, PolicyConfig, score_turn
 from src.safeguards.step_up import (
-    CustomerRecord,
     InMemoryCrm,
+    MemberRecord,
     SimulatedVerifier,
     StepUpConfig,
     StepUpSession,
@@ -94,14 +97,14 @@ from src.safeguards.step_up import (
 from src.safeguards.velocity import DEFAULT_RULES, VelocityStore
 
 VERSION = "0.7.0"
-DEMO_CALLER = "+15555550100"  # caller ID: a landline listed on the customer's record (lookup only)
-DEMO_PHONE_ON_FILE = "+15555550142"  # the mobile on file: where one-time codes go
-DEMO_CUSTOMER = CustomerRecord(customer_id="cust_demo", phone_on_file=DEMO_PHONE_ON_FILE, lookup_numbers=(DEMO_CALLER,))
+DEMO_CALLER = "+19545550100"  # caller ID: a landline listed on the member's record (lookup only)
+DEMO_PHONE_ON_FILE = "+19545550142"  # the mobile on file: where one-time codes go
+DEMO_MEMBER = MemberRecord(customer_id="cust_demo", phone_on_file=DEMO_PHONE_ON_FILE, lookup_numbers=(DEMO_CALLER,))
 MAX_PAYMENT_USD = 5000.0  # the take_payment Lambda's default MAX_PAYMENT_USD
 DEMO_PAY_ACTION = "https://api.example.com/pay_result"
 DEMO_STREAM_URL = "wss://agent.example.com/stream"
 DEMO_CONSENT_URL = "https://api.example.com/consent"
-DEMO_TODAY = date(2026, 10, 5)  # "today" for the scripted agent's date parsing (a Monday)
+DEMO_STATE = "FL"  # the sample credit union's members are in Florida, an all-party consent state
 
 
 class _RecordingClient:
@@ -332,7 +335,7 @@ class DemoEngine:
         *,
         policy: Any = None,  # a LoadedPolicy (policy, velocity_rules, step_up); overrides `config`
         backends: Any = None,
-        customer: CustomerRecord | None = None,
+        customer: MemberRecord | None = None,
         risk: ToggleRiskSignals | None = None,
         code_factory=None,
         call_sid: str | None = None,
@@ -350,7 +353,7 @@ class DemoEngine:
         self.call_sid = call_sid or _new_call_sid()
         self.policy = CallPolicy(config=config, call_id=self.call_sid)
         self.risk_signals = risk or ToggleRiskSignals()
-        self.customer = customer or DEMO_CUSTOMER
+        self.customer = customer or DEMO_MEMBER
         kw = {"code_factory": code_factory} if code_factory else {}
         self.verifier = SimulatedVerifier(clock=lambda: self.now, ttl_seconds=step_up_cfg.code_ttl_seconds, **kw)
         self.step_up = StepUpSession(
@@ -673,7 +676,7 @@ SCENARIOS: list[dict] = [
                 "args": {
                     "caller_name": "Pat",
                     "caller_email": "own@example.com",
-                    "start_iso": "2026-10-08T10:00:00",
+                    "start_iso": "$DATE(thursday 10:00)",
                     "topic": "Business banking follow-up",
                 },
                 "expect": "booked",
@@ -745,13 +748,13 @@ SCENARIOS: list[dict] = [
         "steps": [
             {
                 "tool": "take_payment",
-                "args": {"amount_usd": 49, "description": "Overdraft fee", "customer_email": "pat@example.com"},
+                "args": {"amount_usd": 75, "description": "Credit card payment", "customer_email": "pat@example.com"},
                 "expect": "link_sent",
             },
             {"advance": 20},
             {
                 "tool": "take_payment",
-                "args": {"amount_usd": 49, "description": "Overdraft fee", "customer_email": "pat@example.com"},
+                "args": {"amount_usd": 75, "description": "Credit card payment", "customer_email": "pat@example.com"},
                 "expect": "denied",
             },
         ],
@@ -854,13 +857,13 @@ SCENARIOS.append(
     {
         "id": "keypad",
         "title": "Pay by keypad",
-        "explain": "PAYMENT_MODE=keypad, on a recorded call (one-party state, notice given). take_payment passes "
-        "the same gate, then the recording is paused and the call is handed to Twilio <Pay> with the TwiML "
-        "shown. While the card is keyed in, nothing the caller says reaches the agent. Twilio's result brings "
-        "the call back. (The caller is already verified.)",
+        "explain": "PAYMENT_MODE=keypad, on a recorded call (Florida requires all-party consent; the member pressed "
+        "1). take_payment passes the same gate, then the recording is paused and the call is handed to Twilio "
+        "<Pay> with the TwiML shown. While the card is keyed in, nothing the caller says reaches the agent. "
+        "Twilio's result brings the call back. (The caller is already verified.)",
         "start_verified": True,
         "steps": [
-            {"call_start": {"state": "TX", "recording_enabled": True, "mode": "by_jurisdiction"}},
+            {"call_start": {"state": DEMO_STATE, "digits": "1", "recording_enabled": True, "mode": "by_jurisdiction"}},
             {"mode": "keypad"},
             {
                 "tool": "take_payment",
@@ -883,16 +886,16 @@ SCENARIOS.append(
         "id": "consent",
         "title": "Disclosure, then no to recording",
         "explain": "Every call opens with a fixed AI disclosure played by Twilio, not the model. Recording is on "
-        "and the caller's number is in an all-party consent state, so they're asked; they press 2. The call "
+        "and the member is in Florida, an all-party consent state, so they're asked; they press 2. The call "
         "continues and nothing is recorded; call_disclosure is in the audit log.",
         "steps": [
-            {"call_start": {"state": "CA", "digits": "2", "recording_enabled": True, "mode": "by_jurisdiction"}},
+            {"call_start": {"state": DEMO_STATE, "digits": "2", "recording_enabled": True, "mode": "by_jurisdiction"}},
             {
                 "tool": "book_meeting",
                 "args": {
                     "caller_name": "Lu",
                     "caller_email": "lu@example.com",
-                    "start_iso": "2026-10-09T09:00:00",
+                    "start_iso": "$DATE(friday 09:00)",
                     "topic": "New account appointment",
                 },
                 "expect": "booked",
@@ -902,9 +905,14 @@ SCENARIOS.append(
 )
 
 
+def resolved_scenarios() -> list[dict]:
+    """The guided scenarios with their dates ("$DATE(...)") resolved against today."""
+    return resolve_dates(SCENARIOS)
+
+
 def run_scenario(scenario_id: str, engine: DemoEngine | None = None) -> list[dict]:
     engine = engine or DemoEngine()
-    scenario = next(s for s in SCENARIOS if s["id"] == scenario_id)
+    scenario = next(s for s in resolved_scenarios() if s["id"] == scenario_id)
     if scenario.get("start_verified"):
         engine.pre_verify()
     out = []
@@ -993,9 +1001,11 @@ AGENT_SAYS = {
     "sms_failed": "The payment link was created but the text didn't send. A team member will send it to you.",
 }
 
+AGENT_NAME = "Harbor"  # the agent's name in the sample deployment (scripts/sample_calls.py uses the same)
 GREETING = (
-    "Thanks for calling Cypress Harbor Credit Union. I can check balances, take a loan or card payment, report a "
-    "lost card or a charge you don't recognize, book a loan officer, or update your details."
+    f"Thanks for calling Cypress Harbor Credit Union, this is {AGENT_NAME}, your virtual assistant. I can check "
+    "balances, take a loan or card payment, report a lost card or a charge you don't recognize, book a loan "
+    "officer, or update your details."
 )
 HELP = (
     "I can check your balance, take a loan or card payment, report a lost card or a disputed charge, book a "
@@ -1013,8 +1023,8 @@ BALANCE_REPLY = (
     "transaction is a payroll deposit of $1,912.40 this morning. (Sample balances: this demo has no real accounts.)"
 )
 HOURS_REPLY = (
-    "Most branches are open 9 to 5 on weekdays and 9 to 12 on Saturday; Las Olas and Weston stay open later. "
-    "ATMs are available around the clock."
+    "Most branches are open 9 to 5 on weekdays and 9 to 12 on Saturday; the Fort Lauderdale main office and "
+    "Weston stay open until 6 on weekdays and 1 on Saturday. ATMs are available around the clock."
 )
 ASK = {
     "amount_usd": "How much is the payment for?",
@@ -1045,7 +1055,9 @@ def _amount(text: str) -> float | None:
     return None
 
 
-def _when(text: str, today: date = DEMO_TODAY) -> str | None:
+def _when(text: str, today: date | None = None) -> str | None:
+    """A date-time the caller said ("Tuesday at 2pm", "tomorrow at 10"), relative to today, as local ISO 8601."""
+    today = today or scripted_today()
     iso = _ISO.search(text)
     if iso:
         return iso.group(0) if iso.group(0).count(":") == 2 else iso.group(0) + ":00"
@@ -1058,8 +1070,7 @@ def _when(text: str, today: date = DEMO_TODAY) -> str | None:
     else:
         for i, name in enumerate(_WEEKDAYS):
             if re.search(rf"\b{name}\b", low):
-                ahead = (i - today.weekday()) % 7 or 7
-                day = today + timedelta(days=ahead)
+                day = next_weekday(today, i)
                 break
     hour = minute = None
     t = _TIME.search(text)
@@ -1698,11 +1709,11 @@ class Console:
                 "start_verified": bool(s.get("start_verified")),
                 "tool_steps": sum(1 for st in s["steps"] if "tool" in st),
             }
-            for s in SCENARIOS
+            for s in resolved_scenarios()
         ]
 
     def run_scenario(self, scenario_id: str, source: str = "scenario", suffix: str = "") -> dict:
-        scenario = next((s for s in SCENARIOS if s["id"] == scenario_id), None)
+        scenario = next((s for s in resolved_scenarios() if s["id"] == scenario_id), None)
         if scenario is None:
             raise KeyError(f"no scenario {scenario_id!r}")
         rec = self._new_record(source, scenario["title"] + suffix, scenario_id)
@@ -1744,6 +1755,7 @@ class Console:
         return [
             {
                 "id": p["id"],
+                "title": p.get("title", p["id"]),
                 "kind": p["kind"],
                 "expect": expectation(p),
                 "goal": p["goal"],
@@ -1762,10 +1774,10 @@ class Console:
         caller = persona["caller"]
         on_file = persona.get("phone_on_file", caller)
         lookup = (caller,) if normalize_number(caller) != normalize_number(on_file) else ()
-        customer = CustomerRecord(f"cust_{persona['id']}", phone_on_file=on_file, lookup_numbers=lookup)
+        customer = MemberRecord(f"cust_{persona['id']}", phone_on_file=on_file, lookup_numbers=lookup)
         rec = self._new_record(
             source,
-            persona["id"] + suffix,
+            persona.get("title", persona["id"]) + suffix,
             persona["id"],
             caller=caller,
             customer=customer,
@@ -1800,6 +1812,7 @@ class Console:
         statuses = [t["result"]["status"] for t in rec.tool_calls]
         rec.persona = {
             "id": persona["id"],
+            "title": persona.get("title", persona["id"]),
             "kind": persona["kind"],
             "expect": expect,
             "achieved": achieved,
@@ -2082,7 +2095,7 @@ def api(cmd: str, payload_json: str = "{}") -> str:
                 "steps": s["steps"],
                 "start_verified": bool(s.get("start_verified")),
             }
-            for s in SCENARIOS
+            for s in resolved_scenarios()
         ]
     else:
         raise ValueError(f"unknown command {cmd!r}")

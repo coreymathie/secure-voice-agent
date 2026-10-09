@@ -87,7 +87,7 @@ async def test_payment_link_is_sent_to_caller_number():
     handler = tools.make_handler(
         "take_payment", "+15555550100", executors={"take_payment": fake_exec}, policy=_verified()
     )
-    params, _ = _params({"amount_usd": 40, "description": "Consult", "customer_email": "a@b.co"})
+    params, _ = _params({"amount_usd": 40, "description": "Credit card payment", "customer_email": "a@b.co"})
     await handler(params)
     assert seen["customer_phone"] == "+15555550100"
 

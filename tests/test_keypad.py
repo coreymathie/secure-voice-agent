@@ -34,7 +34,7 @@ def _pay(twiml: str) -> ET.Element:
 
 
 def test_pay_twiml_collects_by_keypad_with_the_amount_and_action():
-    xml = pay_twiml.build_pay_twiml(120, "Annual service", ACTION, resume_recording=True)
+    xml = pay_twiml.build_pay_twiml(120, "Personal loan payment", ACTION, resume_recording=True)
     pay = _pay(xml)
     assert pay.attrib["input"] == "dtmf" and pay.attrib["paymentMethod"] == "credit-card"
     assert pay.attrib["chargeAmount"] == "120.00" and pay.attrib["currency"] == "usd"
@@ -47,7 +47,7 @@ def test_pay_twiml_attribute_names_match_the_twilio_helper_library():
     from twilio.twiml.voice_response import VoiceResponse
 
     cfg = pay_twiml.KeypadConfig(connector="Stripe_Prod")
-    ours = _pay(pay_twiml.build_pay_twiml("45.5", "Repair", ACTION, cfg, status_callback=ACTION + "/status"))
+    ours = _pay(pay_twiml.build_pay_twiml("45.5", "Card payment", ACTION, cfg, status_callback=ACTION + "/status"))
     ref = VoiceResponse()
     ref.pay(
         input="dtmf",
@@ -55,7 +55,7 @@ def test_pay_twiml_attribute_names_match_the_twilio_helper_library():
         payment_method="credit-card",
         charge_amount="45.50",
         currency="usd",
-        description="Repair",
+        description="Card payment",
         action=ACTION,
         timeout=10,
         max_attempts=2,
@@ -161,7 +161,7 @@ def _event(body, key="k1"):
 
 def test_keypad_payment_pauses_recording_then_redirects(keypad_env):
     fake, _ = keypad_env
-    resp = keypad_payment.handler(_event({"amount_usd": 80, "description": "Repair", "call_sid": CALL}), None)
+    resp = keypad_payment.handler(_event({"amount_usd": 80, "description": "Card payment", "call_sid": CALL}), None)
     body = json.loads(resp["body"])
     assert body["status"] == "keypad_started" and body["recording"] == "paused"
     assert [e[0] for e in fake.events] == ["recording", "redirect"]

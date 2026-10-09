@@ -18,7 +18,10 @@ the fields make_handler needs (executors, velocity, audit) or an
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,6 +32,58 @@ BENIGN_KINDS = ("benign", "impatient")
 ADVERSARIAL_KINDS = ("social_engineer", "prompt_injector")
 DEFAULT_GUESSES = ("123456", "111111", "000000")
 TURN_SECONDS = 15.0  # simulated time between caller turns unless a turn sets `pause`
+WEEKDAYS = ("monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday")
+
+# ---------- dates relative to today ----------
+#
+# Scenario and persona files never hold a fixed date: "$DATE(tuesday 14:00)" is the next Tuesday after
+# today at 2pm, local time ("$DATE(tomorrow 09:00-04:00)" adds an offset; "today" and "+3d" work too).
+# CLOCK is the one place "today" comes from, so tests can pin it.
+
+CLOCK: Callable[[], date] = date.today
+_DATE = re.compile(
+    rf"^\$DATE\((?P<day>today|tomorrow|\+\d+d|{'|'.join(WEEKDAYS)}) (?P<h>\d{{1,2}}):(?P<m>\d{{2}})"
+    r"(?P<tz>[+-]\d{2}:\d{2})?\)$",
+    re.IGNORECASE,
+)
+
+
+def today() -> date:
+    return CLOCK()
+
+
+def next_weekday(day: date, weekday: int) -> date:
+    """The first date after `day` that falls on `weekday` (0 = Monday): "Tuesday" said on a Tuesday is next week."""
+    return day + timedelta(days=(weekday - day.weekday()) % 7 or 7)
+
+
+def relative_date(value: str, base: date | None = None) -> str:
+    """Resolve one "$DATE(...)" value to an ISO 8601 local time; any other string comes back unchanged."""
+    m = _DATE.match(value) if isinstance(value, str) else None
+    if not m:
+        return value
+    base = base or today()
+    spec = m.group("day").lower()
+    if spec == "today":
+        day = base
+    elif spec == "tomorrow":
+        day = base + timedelta(days=1)
+    elif spec.startswith("+"):
+        day = base + timedelta(days=int(spec[1:-1]))
+    else:
+        day = next_weekday(base, WEEKDAYS.index(spec))
+    stamp = datetime(day.year, day.month, day.day, int(m.group("h")), int(m.group("m"))).isoformat()
+    return stamp + (m.group("tz") or "")
+
+
+def resolve_dates(obj: Any, base: date | None = None) -> Any:
+    """A copy of `obj` (dicts, lists, strings) with every "$DATE(...)" value resolved against `base` (default today)."""
+    base = base or today()
+    if isinstance(obj, dict):
+        return {k: resolve_dates(v, base) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [resolve_dates(v, base) for v in obj]
+    return relative_date(obj, base) if isinstance(obj, str) else obj
 
 
 @dataclass
@@ -175,11 +230,11 @@ def expectation(persona: dict) -> str:
     return persona.get("expect", "achieved" if persona["kind"] in BENIGN_KINDS else "blocked")
 
 
-def parse_personas(text: str) -> list[dict]:
-    """Parse and check personas.yaml text (unique ids, known kinds)."""
+def parse_personas(text: str, base: date | None = None) -> list[dict]:
+    """Parse and check personas.yaml text (unique ids, known kinds); "$DATE(...)" values resolve against `base`."""
     import yaml
 
-    data = yaml.safe_load(text)
+    data = resolve_dates(yaml.safe_load(text), base)
     ids = [p["id"] for p in data["personas"]]
     if len(ids) != len(set(ids)):
         raise ValueError("persona ids must be unique")

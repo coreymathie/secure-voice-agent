@@ -50,18 +50,21 @@ def test_each_adversary_is_stopped_by_the_control_it_targets(results):
 
 
 def test_personas_use_only_reserved_numbers_and_example_domains():
+    """555-0100 to 555-0199 is reserved for fiction; members are in South Florida area codes."""
     text = simulate.PERSONAS_PATH.read_text()
-    for number in re.findall(r"\+1\d{10}", text):
-        assert number.startswith("+1555555"), number
-    for spoken in re.findall(r"\b\d{3}-\d{3}-\d{4}\b", text):
-        assert spoken.startswith("555-555-"), spoken
+    numbers = re.findall(r"\+1\d{10}", text)
+    assert numbers
+    for number in numbers:
+        assert re.fullmatch(r"\+1(954|754|305|786|561)55501\d\d", number), number
+    for spoken in re.findall(r"\(?\b\d{3}\)?[ -]\d{3}-\d{4}\b", text):
+        assert re.fullmatch(r"\((954|754|305|786|561)\) 555-01\d\d", spoken), spoken
     for domain in re.findall(r"@([\w.-]+)", text):
         assert domain.rstrip(".") == "example.com", domain
 
 
 def test_personas_file_is_well_formed():
     for p in simulate.load_personas():
-        assert p["turns"] and p["goal"], p["id"]
+        assert p["turns"] and p["goal"] and p["title"], p["id"]
         assert p.get("expect", "") in ("achieved", "blocked"), p["id"]
         assert (p["expect"] == "achieved") == (p["kind"] in simulate.BENIGN_KINDS), p["id"]
 

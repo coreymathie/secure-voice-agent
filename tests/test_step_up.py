@@ -15,7 +15,7 @@ from src.safeguards.velocity import VelocityStore
 
 CALLER = "+15555550100"  # caller ID (a landline on the record)
 MOBILE = "+15555550142"  # phone on file
-RECORD = su.CustomerRecord("cust_1", phone_on_file=MOBILE, lookup_numbers=(CALLER,))
+RECORD = su.MemberRecord("cust_1", phone_on_file=MOBILE, lookup_numbers=(CALLER,))
 
 
 class Clock:
