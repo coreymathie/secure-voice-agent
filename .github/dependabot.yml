@@ -5,7 +5,7 @@ version: 2
 updates:
   - package-ecosystem: pip
     directory: /
-    schedule: &weekly
+    schedule:
       interval: weekly
       day: monday
       time: "06:00"
@@ -21,7 +21,11 @@ updates:
 
   - package-ecosystem: pip
     directory: /src/handlers
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/New_York
     cooldown:
       default-days: 7
     groups:
@@ -31,7 +35,11 @@ updates:
       prefix: deps
   - package-ecosystem: docker
     directory: /
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/New_York
     cooldown:
       default-days: 7
     commit-message:
@@ -39,7 +47,11 @@ updates:
 
   - package-ecosystem: github-actions
     directory: /
-    schedule: *weekly
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: America/New_York
     cooldown:
       default-days: 7
     groups:
