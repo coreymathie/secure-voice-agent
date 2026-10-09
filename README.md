@@ -7,13 +7,17 @@
 
 **A reference implementation of a governed phone agent for regulated financial services: an AI agent that takes payments and writes to business systems, with deterministic controls between the model and every action it takes.**
 
-## Executive summary
+## At a glance
 
-- **Business problem.** A credit union or bank that puts an AI agent on its member line hands an untrusted caller a model that can send payment links, change contact details and write into the CRM, ticketing and calendar systems. Prompt rules do not hold against a determined social engineer, and callers read card numbers and SSNs aloud into whatever the agent is filling in.
-- **Architectural approach.** The model proposes; plain, testable code decides. Every tool call passes through one safeguard layer (`make_handler()`) before anything executes. Short, stateless tools run on AWS Lambda behind HMAC-signed requests; each call holds one long-lived worker on Fly.io or ECS. The safeguards do not depend on the voice provider.
-- **Key controls.** A default-deny policy gate with social-engineering scoring and per-call blast-radius caps, step-up verification to the phone on file (caller ID is never identity), velocity limits, identifier scrubbing, a hash-chained audit log, idempotent money movement, PCI scope reduction by pay-by-link or keypad capture, and AI disclosure with recording consent before the agent connects. The control set applies patterns from card-fraud and dispute operations to an AI agent.
-- **Evidence.** 417 pytest tests, 31/31 call-eval scenarios through the real stack, 22 mutation tests that switch controls off and confirm the evals fail, 14 simulated callers (7/7 benign succeeded, 7/7 adversarial stopped, 0 benign blocked; scripted and text-level, not a measured rate on real calls), and a 138-check browser smoke test of the console.
-- **Out of scope.** No latency or cost figures are published (none have been measured here); no live model or synthetic speech drives the evals; Twilio `<Pay>`, Twilio Verify and SIM-swap data sources are not exercised; nothing here is a compliance certification.
+| | |
+|---|---|
+| **Problem** | An agent on a public phone number holds tools that send payment links and write to the calendar, ticketing and CRM. Callers apply social engineering and read card numbers and SSNs aloud. |
+| **Architecture** | Twilio → one long-lived Pipecat worker per call (Fly.io or ECS) → safeguard layer → HMAC-signed, idempotent tool handlers on AWS Lambda + DynamoDB. |
+| **Key decisions** | Safeguards in code, not prompts or a judge model; provider-independent (speech-to-speech default, cascaded as a swap); payment links pinned to the calling number. [4 ADRs](#key-decisions-and-trade-offs). |
+| **Controls** | Default-deny allow-list, social-engineering scoring, step-up verification to the phone on file, per-call caps, velocity limits, identifier scrubbing, hash-chained audit, idempotency, signed requests. Policy as code in [`config/policy.yaml`](config/policy.yaml). |
+| **Evidence** | 417 pytest tests, including 22 mutation tests that switch controls off; 31/31 call evals; 14 simulated callers (7/7 benign served, 7/7 adversarial stopped, 0 benign blocked; scripted and text-level, not a measured rate on real calls); a 138-check browser smoke test of the console. |
+| **Out of scope** | No latency or cost figures are published (none have been measured here); no live model or synthetic speech drives the evals; Twilio `<Pay>`, Twilio Verify and SIM-swap data sources are not exercised; nothing here is a compliance certification. |
+| **Try it** | [Live console](https://coreymathie.github.io/secure-voice-agent/demo/): the repo's real safeguard code running in the browser through Pyodide. No backend, no keys. |
 
 ## Live demo
 
