@@ -28,7 +28,7 @@ Neither mode places or answers a phone call, and neither uses a language model. 
 
 ## Sample workspace: Cypress Harbor Credit Union
 
-The console opens on a sample business so the agent can be judged at the scale it would run at: **Cypress Harbor Credit Union**, a *fictional* credit union (92,400 members, $1.4B in assets, 11 branches, 38 member-services agents). Its 90 days of contact-center data and today's 320 most recent calls (members, transcripts, outcomes, the safeguards on each call; about one in six in Spanish) come from [`scripts/generate_sample_company.py`](../scripts/generate_sample_company.py) and [`scripts/sample_calls.py`](../scripts/sample_calls.py), seeded and checked in CI.
+The console opens on a sample business so the agent can be judged at the scale it would run at: **Cypress Harbor Credit Union**, a *fictional* credit union (92,400 members, $1.4B in assets, 11 branches, 38 member-services agents). Its 90 days of contact-center data and today's 320 most recent calls (members, transcripts, outcomes, the safeguards on each call; 21 of them in Spanish) come from [`scripts/generate_sample_company.py`](../scripts/generate_sample_company.py) and [`scripts/sample_calls.py`](../scripts/sample_calls.py), seeded and checked in CI.
 
 Honesty labels:
 

@@ -194,8 +194,9 @@ def build() -> dict:
         {
             "date": "2026-10-07",
             "kind": "ops",
-            "title": "Spanish-language calls: 16% of today's volume",
-            "detail": "Calls in Spanish are answered in Spanish end to end; transfers go to the bilingual queue.",
+            "title": "Spanish-language calls handled end to end in Spanish",
+            "detail": "Members who open in Spanish are verified, served and summarized in Spanish; "
+            "transfers go to the bilingual queue.",
         },
         {
             "date": "2026-10-06",
