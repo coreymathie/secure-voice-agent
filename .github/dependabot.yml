@@ -1,7 +1,7 @@
 # Security fixes for Python packages arrive as soon as they're published.
 # Routine Python updates are off: requirements set minimum versions, not pins, so
 # installs already resolve to current releases and raising a floor adds little.
-# GitHub Actions arrive as one grouped pull request a week. Majors are skipped.
+# GitHub Actions arrive as one grouped pull request a week, majors included.
 # A 7-day cooldown skips brand-new releases; CI runs on every Dependabot pull request.
 version: 2
 updates:
@@ -45,9 +45,6 @@ updates:
       timezone: America/New_York
     cooldown:
       default-days: 7
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: deps
 
@@ -63,8 +60,5 @@ updates:
     groups:
       actions:
         patterns: ["*"]
-    ignore:
-      - dependency-name: "*"
-        update-types: ["version-update:semver-major"]
     commit-message:
       prefix: ci
