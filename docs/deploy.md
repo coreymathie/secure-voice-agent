@@ -1,5 +1,7 @@
 # Deploy
 
+This document is the production deployment runbook. The topology follows ADR 0003: short, stateless handlers on AWS Lambda with per-function secrets, and the long-lived voice process on Fly.io (ECS is the equivalent on AWS). Secrets live in AWS Secrets Manager, and every tool request is signed.
+
 Two targets:
 
 - **AWS**: the voice webhook and four tool handlers on Lambda behind an HTTP API, with a DynamoDB table for idempotency
@@ -25,7 +27,7 @@ aws secretsmanager create-secret --name voice-agent/prod --secret-string '{
 }'
 ```
 
-Not using one of the integrations? Put any placeholder value for its keys; that handler simply won't be called.
+For an integration that is not in use, put any placeholder value for its keys; that handler won't be called.
 
 ## 2. Deploy the Lambda side
 
@@ -39,7 +41,7 @@ sam deploy --guided --parameter-overrides \
 Stack outputs:
 
 - `ApiBaseUrl`: set as `LAMBDA_BASE_URL` on the voice process
-- `VoiceWebhookUrl`: paste into your Twilio number's "A call comes in" webhook (HTTP POST)
+- `VoiceWebhookUrl`: paste into the Twilio number's "A call comes in" webhook (HTTP POST)
 
 ## 3. Deploy the voice process to Fly.io
 
@@ -57,13 +59,13 @@ flyctl secrets set \
 flyctl deploy
 ```
 
-If the Fly hostname differs from what you passed to SAM, redeploy SAM with the right `AgentPublicWsUrl`.
+If the Fly hostname differs from the value passed to SAM, redeploy SAM with the right `AgentPublicWsUrl`.
 
 Optional on the voice process: the policy gate's limits (`POLICY_*`, defaults in `.env.example`) and tracing (`OTEL_EXPORTER_OTLP_ENDPOINT`, see [`observability.md`](observability.md)). Set them with `flyctl secrets set` like the rest.
 
 **Signing secret:** add `TOOL_API_SECRET` (a long random string, e.g. `openssl rand -hex 32`) to the Secrets Manager secret and set the same value on the voice process. Tool Lambdas reject every request that isn't signed with it (`401`), including all requests when the secret is missing. See [`adr/0003`](adr/0003-lambda-tools-long-lived-call-worker.md).
 
-**Step-up verification:** payments and contact changes need a caller verified by a one-time code (see [`auth.md`](auth.md)). Create a Twilio Verify service and set `TWILIO_VERIFY_SERVICE_SID` on the voice process, and implement `CrmLookup` in `src/safeguards/step_up.py` against your CRM (`CRM_LOOKUP_FILE` is for local development). Without both, high-tier tools hand off to a person. `POLICY_STEP_UP_MIN_TIER=off` turns step-up off.
+**Step-up verification:** payments and contact changes need a caller verified by a one-time code (see [`auth.md`](auth.md)). Create a Twilio Verify service and set `TWILIO_VERIFY_SERVICE_SID` on the voice process, and implement `CrmLookup` in `src/safeguards/step_up.py` against the institution's CRM (`CRM_LOOKUP_FILE` is for local development). Without both, high-tier tools hand off to a person. `POLICY_STEP_UP_MIN_TIER=off` turns step-up off.
 
 Post-call summaries use whichever model key is already set (`OPENAI_API_KEY` for the default provider). To choose explicitly, also set `SUMMARY_PROVIDER=anthropic` with `ANTHROPIC_API_KEY`, or `SUMMARY_PROVIDER=none` for rule-based notes only. Notes land on the caller's GoHighLevel contact when `GOHIGHLEVEL_API_KEY` is in the secret; otherwise they are kept in the audit log only.
 
@@ -76,9 +78,9 @@ flyctl logs                                   # call started / call ended
 flyctl ssh console -C "tail -n 20 logs/audit.jsonl"
 ```
 
-After hanging up you should see a `call_summary` entry at the end of the audit log, and a new note on the caller's CRM contact.
+After hang-up, the audit log ends with a `call_summary` entry, and the caller's CRM contact has a new note.
 
-Before going live, run the evals against your configuration (for example after changing velocity rules or `MAX_PAYMENT_USD`):
+Before going live, run the evals against the deployment's configuration (for example after changing velocity rules or `MAX_PAYMENT_USD`):
 
 ```bash
 python -m evals.run

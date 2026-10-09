@@ -1,8 +1,8 @@
 # Step-up verification
 
-Caller ID tells you which number the phone network says is calling. It is easy to spoof, so it is not identity. Before a high-tier tool runs (`take_payment`, `update_contact`), the caller has to prove they hold the phone number on the customer's record by reading back a one-time code sent to that number.
+Step-up verification is the identity control in front of money movement and contact changes. Caller ID reports which number the phone network says is calling; it is easy to spoof, so it is not identity. Before a high-tier tool runs (`take_payment`, `update_contact`), the caller proves they hold the phone number on the member's record by reading back a one-time code sent to that number. This is the same step-up pattern card-fraud operations apply before high-risk account changes.
 
-This page covers what is implemented, how it maps to NIST SP 800-63B, the risk we accept by using a code over SMS or a voice call, and what a deployment has to supply.
+This document covers what is implemented, how it maps to NIST SP 800-63B, the risk accepted by using a code over SMS or a voice call, and what a deployment has to supply.
 
 Code: [`src/safeguards/step_up.py`](../src/safeguards/step_up.py), the step-up rule in [`src/safeguards/policy_gate.py`](../src/safeguards/policy_gate.py), wiring in [`src/agent/tools.py`](../src/agent/tools.py) and [`src/agent/bot.py`](../src/agent/bot.py). Tests: [`tests/test_step_up.py`](../tests/test_step_up.py). Evals: `caller-id-is-not-identity`, `step-up-then-pay`, `otp-lockout`, `sim-swap-signal`, `account-takeover-sequence`.
 
@@ -63,19 +63,19 @@ This is an engineering reading of SP 800-63B (Digital Identity Guidelines, Authe
 - **Pre-registered destination.** The out-of-band secret has to go to a number associated with the subscriber beforehand, not one supplied during the authentication. Here that is `phone_on_file` from the CRM record; the caller's number and the model's arguments are never used as the destination.
 - **Risk indicators before using the PSTN.** SP 800-63B says verifiers should consider indicators such as device swap, SIM change, and number porting before sending a secret over the PSTN. That is the `RiskSignalProvider` hook: if it reports `recent_sim_swap`, `recent_number_port`, or `recent_contact_change` for the number on file, no code is sent and the call hands off.
 - **Secret properties.** Codes are random, at least 6 digits, single use, and short-lived (10 minutes by default here).
-- **Rate limiting.** SP 800-63B requires limiting consecutive failed attempts. This repo is much stricter than the guideline's ceiling: 3 per call, then lockout, plus a per-number velocity limit across calls.
-- **Not covered:** identity proofing (who the customer is in the first place), phishing resistance (a caller can be socially engineered into reading their code to an attacker), and authenticator lifecycle (binding, rebinding, and revoking the number on file) are outside this repo.
+- **Rate limiting.** SP 800-63B requires limiting consecutive failed attempts. This design is much stricter than the guideline's ceiling: 3 per call, then lockout, plus a per-number velocity limit across calls.
+- **Not covered:** identity proofing (who the customer is in the first place), phishing resistance (a caller can be socially engineered into reading their code to an attacker), and authenticator lifecycle (binding, rebinding, and revoking the number on file) are outside this repository.
 
 ## Risk acceptance: SMS / voice one-time codes (restricted authenticator)
 
-Use this as a starting template; the deployer owns the decision and should record who accepted it and when.
+This table is a starting template; the deployer owns the decision and records who accepted it and when.
 
 | Item | Statement |
 |---|---|
 | What is accepted | One-time codes delivered by SMS or voice call to the phone on file, used as step-up before payment links and contact changes on inbound calls. |
 | Why | Callers on a phone line have the phone; there is no app or hardware key to rely on. The actions protected are bounded (per-call caps, velocity limits, pay-by-link to the calling number). |
 | Known weaknesses | SIM swap and number porting move the number to an attacker; SS7 and carrier-level interception; malware on the handset; a caller can be tricked into reading their own code to an impostor. |
-| Mitigations in this repo | Codes only to the number on file; SIM-swap / porting hook (`RiskSignalProvider`) that blocks the PSTN and hands off; 3-attempt lockout per call; per-number velocity across calls; social-engineering score checked before a code is offered; account-takeover rule (contact change then payment hands off); every step audited without the code or the number. |
+| Mitigations in this repository | Codes only to the number on file; SIM-swap / porting hook (`RiskSignalProvider`) that blocks the PSTN and hands off; 3-attempt lockout per call; per-number velocity across calls; social-engineering score checked before a code is offered; account-takeover rule (contact change then payment hands off); every step audited without the code or the number. |
 | Mitigations the deployer must add | A real `RiskSignalProvider` (carrier or vendor SIM-swap / porting lookups); an alternative that is not restricted for customers who ask for one (for example a callback by staff, or verification in an authenticated app or portal); telling customers that SMS codes carry these risks; a review of handoffs. |
 | Residual risk | An attacker who controls the number on file and isn't caught by the risk signal can pass step-up. The per-call caps and the takeover rule bound what they can do on that call. |
 | Review trigger | A confirmed takeover, a change in the tools that require step-up, or availability of a stronger authenticator for this customer base. |
@@ -90,12 +90,12 @@ Use this as a starting template; the deployer owns the decision and should recor
 | `STEP_UP_CODE_TTL_SECONDS` | `600` | Lifetime of a code (simulated verifier and the session's own check). |
 | `STEP_UP_CHANNELS` | `sms,call` | Channels the agent may choose. |
 | `TWILIO_VERIFY_SERVICE_SID` | — | Turns on `TwilioVerifyVerifier`. Without it, nobody can verify and high-tier tools hand off. |
-| `CRM_LOOKUP_FILE` | — | Local development only: a JSON list of `{customer_id, phone_on_file, lookup_numbers}`. In production, implement `CrmLookup` against your CRM. |
+| `CRM_LOOKUP_FILE` | — | Local development only: a JSON list of `{customer_id, phone_on_file, lookup_numbers}`. In production, implement `CrmLookup` against the institution's CRM. |
 
 ## What is real and what is simulated
 
 - **Real, tested here:** the session logic, the gate rules, lockout, masking, the takeover rule, the `update_contact` Lambda's validation, and the `TwilioVerifyVerifier` call shape (against a stand-in client).
-- **Not exercised here:** Twilio Verify itself, any CRM lookup other than the in-memory one, and any real SIM-swap data source. No `RiskSignalProvider` for a carrier or vendor ships with this repo.
+- **Not exercised here:** Twilio Verify itself, any CRM lookup other than the in-memory one, and any real SIM-swap data source. No `RiskSignalProvider` for a carrier or vendor ships with this repository.
 
 ## Known limitations
 
