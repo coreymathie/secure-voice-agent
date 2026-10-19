@@ -1,6 +1,6 @@
 # Corey Mathie, 2026
 # Voice process image (Fly.io / ECS). The Lambda handlers are packaged separately by `sam build`.
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
