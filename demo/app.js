@@ -503,7 +503,8 @@ async function renderBusiness(view) {
       </dl>
       <p class="hint">Cost assumptions: ${esc(a.note)}</p>
   </section>
-  </div>`;
+  </div>
+  ${benchmarksHtml(data.benchmarks)}`;
   wireGo(view);
   wireMemberRows(view, go);
   $("#banner-x", view)?.addEventListener("click", () => { try { localStorage.setItem(BANNER_KEY, "hidden"); } catch { /* storage blocked */ } $("#sample-banner")?.remove(); });
@@ -521,6 +522,21 @@ async function renderBusiness(view) {
   ], color: "var(--series-2)", name: "calls"});
   const xs = range / 30;
   bars($("#chart-xfer", view), {rows: data.transfer_reasons.map((r) => ({label: r.reason, value: Math.round(r.calls_30d * xs)})), color: "var(--series-1)", name: "calls"});
+}
+
+// "How these sample numbers were set": one row per headline figure, from demo/data/sample_company.json.
+function benchmarksHtml(rows) {
+  if (!rows || !rows.length) return "";
+  const cited = rows.filter((r) => r.source).length;
+  const src = (r) => r.source
+    ? `<a href="${esc(r.source.url)}" rel="noopener">${esc(r.source.title)}</a>, ${esc(r.source.publisher)}, ${esc(r.source.year)}<span class="sub">“${esc(r.source.quote)}”</span>`
+    : `<span class="tag sample">${esc(r.label)}</span>`;
+  return `<section class="card" aria-labelledby="bench-h">
+    <div class="card-head"><h2 id="bench-h">How these sample numbers were set</h2><span class="tag sample">sample</span></div>
+    <p class="hint">Every figure on this view is generated for a fictional credit union, not measured. Each row says what sets it in the generator<span class="tech-only"> (<code>scripts/generate_sample_company.py</code>, <code>scripts/sample_calls.py</code>)</span> and, where one has been verified, the published benchmark it is calibrated to. ${cited ? `${cited} of ${rows.length} figures cite a source.` : "No figure cites a published benchmark yet; each is labelled as an assumption."} Values are for the 30 days to the latest sample day.</p>
+    <div class="table-wrap"><table id="bench-table"><thead><tr><th>Figure</th><th>In this sample</th><th class="hide-sm">What sets it</th><th>Source</th></tr></thead><tbody>
+    ${rows.map((r) => `<tr><td class="wrap">${esc(r.figure)}</td><td class="nw" translate="no">${esc(r.value)}</td><td class="hide-sm wrap tiny">${esc(r.basis)}</td><td class="wrap tiny">${src(r)}</td></tr>`).join("")}
+    </tbody></table></div></section>`;
 }
 
 function intentTable(intents, scale) {
@@ -1368,7 +1384,7 @@ async function renderEvals(view) {
     ${tile("False-positive rate", `${Math.round(m.false_positive_rate * 100)}%`, "benign callers blocked", "measured")}
     ${pt ? tile("Automated tests", `${pt.passed}<small> passed</small>`, `${pt.failed} failed · ${pt.skipped} skipped`, "measured", true) : ""}
   </section>
-  <div class="callout"><b>What these numbers are.</b> Automated tests of the safeguards on scripted conversations, run on every change. They show each control works as designed; they aren't a measure of live call traffic.<span class="tech-only"> Text-level only: tool calls (evals) and scripted conversations (simulated callers) run through the real policy gate, step-up, velocity, scrubbing, audit log and Lambda handler code. No audio, no speech recognition, no language model, and no real Stripe, Twilio, calendar, ticketing or CRM. 14 hand-written personas are not a rate on real calls. No latency or cost numbers are measured here.</span></div>
+  <div class="callout"><b>What these numbers are.</b> Automated tests of the safeguards on scripted conversations, run on every change. They show each control works as designed; they aren't a measure of live call traffic.<span class="tech-only"> Text-level only: tool calls (evals) and scripted conversations (simulated callers) run through the real policy gate, step-up, velocity, scrubbing, audit log and Lambda handler code. No audio, no speech recognition, no language model, and no real Stripe, Twilio, calendar, ticketing or CRM. Scripted personas (14 hand-written, the rest from a seeded generator) are not a rate on real calls. No latency or cost numbers are measured here.</span></div>
   <div id="ev-browser-out"></div>
   <section class="card" aria-labelledby="ce-h"><div class="card-head"><h2 id="ce-h">Call evals · ${ce.passed}/${ce.total}</h2><span class="hint tech-only">evals/scenarios.yaml</span></div>
     <div class="table-wrap"><table><thead><tr><th></th><th>Scenario</th><th class="hide-sm">Risk covered</th><th>Tool outcomes</th></tr></thead><tbody>
@@ -1381,7 +1397,8 @@ async function renderEvals(view) {
   <section class="card" aria-labelledby="sc-h"><div class="card-head"><h2 id="sc-h">Simulated callers · ${m.expectations_met}/${m.personas} as expected</h2><span class="hint">${esc(m.handoffs)} handed to a person<span class="tech-only"> · evals/personas.yaml</span></span></div>
     <div class="table-wrap"><table><thead><tr><th></th><th>Persona</th><th>Kind</th><th>Goal</th><th>Tool results</th><th class="hide-sm">Controls</th></tr></thead><tbody>
     ${sc.personas.map((p) => `<tr><td>${p.correct ? '<span class="ok-mark">✓</span>' : '<span class="bad-mark">✗</span>'}</td><td class="wrap">${esc(p.title || p.id)}<span class="sub mono tech-only">${esc(p.id)}</span></td><td><span class="tag">${esc(p.kind.replace("_", " "))}</span></td><td>${esc(p.achieved ? "achieved" : "blocked")}<span class="sub">expected ${esc(p.expect)}</span></td><td>${statusChain(p.tool_statuses)}</td><td class="hide-sm">${p.controls.length ? `<span class="chips">${p.controls.map((x) => `<span class="chip neutral">${esc(controlName(x))}</span>`).join("")}</span>` : ""}</td></tr>`).join("")}
-    </tbody></table></div></section>`;
+    </tbody></table></div></section>
+  ${allCallersHtml(c.simulated_callers_all)}`;
   $("#ev-run")?.addEventListener("click", (e) => act(async () => {
     S.evalsLive = await call("evals_run");
     toast(`Evals re-run on the server: ${S.evalsLive.call_evals.passed}/${S.evalsLive.call_evals.total}`);
@@ -1397,6 +1414,28 @@ async function renderEvals(view) {
     const rm = r.metrics;
     $("#ev-browser-out").innerHTML = `<div class="callout ${diff.length ? "warn" : "ok"}"><span class="tag sim">in your browser</span> Played all ${rm.personas} simulated callers just now with simulated backends instead of the Lambda handlers: ${rm.expectations_met}/${rm.personas} as expected, task success ${rm.task_success.achieved}/${rm.task_success.of}, correct refusals ${rm.correct_refusals.blocked}/${rm.correct_refusals.of}. ${diff.length ? `${diff.length} differ from the measured run: ${diff.map((p) => esc(p.id)).join(", ")}.` : "Every persona got the same tool results as the measured run."} The calls are under Test calls.</div>`;
   }, e.currentTarget));
+}
+
+// The whole simulated-caller set (hand-written + seeded generator), counts only: by set, language and side.
+function allCallersHtml(all) {
+  if (!all || !all.breakdown) return "";
+  const m = all.metrics;
+  const LANG = {en: "English", es: "Spanish"};
+  const SET = {handwritten: "Hand-written", generated: "Generated"};
+  return `<section class="card" aria-labelledby="sa-h"><div class="card-head"><h2 id="sa-h">All simulated callers · ${num(all.personas)}</h2><span class="hint" translate="no">${num(all.regressions.length)} regressions · ${num(all.known_gap_misses)} known-gap misses</span></div>
+    <p class="hint">The 14 callers above plus ${num(all.personas - 14)} from a seeded generator: reworded scam patterns, legitimate callers who sound urgent or unusual, and Spanish-language callers. Cases that probe a documented limitation are marked as known gaps: they count in these totals but don't fail the build.<span class="tech-only"> <code>evals/personas_generated.yaml</code> from <code>scripts/generate_personas.py</code>; <code>python -m evals.simulate</code>.</span></p>
+    <section class="tiles" aria-label="All simulated callers">
+      ${tile("Task success", `${num(m.task_success.achieved)}<small> / ${num(m.task_success.of)}</small>`, "benign + impatient", "measured", true)}
+      ${tile("Correct refusals", `${num(m.correct_refusals.blocked)}<small> / ${num(m.correct_refusals.of)}</small>`, "adversarial", "measured", true)}
+      ${tile("False-positive rate", `${Math.round(m.false_positive_rate * 100)}%`, "benign callers handed off", "measured")}
+    </section>
+    <div class="table-wrap"><table id="sa-table"><thead><tr><th>Set</th><th>Language</th><th>Callers</th><th class="num">Total</th><th class="num">Served</th><th class="num">Stopped</th><th class="num">Known-gap misses</th></tr></thead><tbody>
+    ${all.breakdown.map((b) => `<tr><td>${esc(SET[b.set] || b.set)}</td><td>${esc(LANG[b.language] || b.language)}</td><td>${b.side === "benign" ? "Members" : "Adversaries"}</td><td class="num" translate="no">${num(b.personas)}</td><td class="num" translate="no">${num(b.served)}</td><td class="num" translate="no">${num(b.stopped)}</td><td class="num" translate="no">${num(b.known_gap_misses)}</td></tr>`).join("")}
+    </tbody></table></div>
+    <h3 style="margin:14px 0 6px">Known gaps</h3>
+    <div class="table-wrap"><table id="sa-gaps"><thead><tr><th>Callers</th><th class="num">Missed</th><th class="num">Met</th><th>Why</th></tr></thead><tbody>
+    ${all.known_gaps.map((g) => `<tr><td class="wrap"><span class="mono tiny">${esc(g.category)}</span> <span class="tag">${esc(LANG[g.language] || g.language)}</span></td><td class="num" translate="no">${num(g.missed)}</td><td class="num" translate="no">${num(g.met)}</td><td class="wrap tiny">${esc(g.reason)}</td></tr>`).join("")}
+    </tbody></table></div></section>`;
 }
 
 // ---------- Settings ----------

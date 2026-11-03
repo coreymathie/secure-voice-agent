@@ -91,6 +91,47 @@ ASSUMPTIONS = {
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 
+# ---------- how the sample numbers were set ----------
+#
+# One row per headline figure on the Sample business view: the value in this sample (the 30 days to the
+# latest sample day), what sets it, and the published benchmark it is calibrated to. A row may cite a
+# source only if the page was fetched and read and `quote` is the sentence the figure comes from; then
+# it needs title, publisher, year, url and quote (tests/test_sample_company.py checks this). A row with
+# no source is labelled an assumption. The console's "How these sample numbers were set" panel and the
+# table in docs/console.md both come from this list (through demo/data/sample_company.json).
+
+UNVERIFIED = "Assumption (no published benchmark verified)"
+BENCHMARKS = [
+    {"figure": "Calls answered by the agent", "key": "calls",
+     "basis": "Volume model in generate_sample_company.py: about 1,020 calls on a typical weekday at the "
+              "start of the period, "
+              "a weekly shape, payday peaks and three events."},
+    {"figure": "Resolved without a transfer", "key": "containment",
+     "basis": "Each intent's resolution rate in scripts/sample_calls.py, with a tuning gain of 10 points over "
+              "the 90 days."},
+    {"figure": "Average call length", "key": "avg_handle",
+     "basis": "Scripted call timings in scripts/sample_calls.py: the disclosure, the consent prompt and each turn."},
+    {"figure": "Member satisfaction", "key": "csat",
+     "basis": "Post-call survey ratings drawn per call outcome in scripts/sample_calls.py."},
+    {"figure": "Member-services cost per agent-handled call", "key": "agent_cost",
+     "basis": "ASSUMPTIONS in generate_sample_company.py: fully loaded cost of a call handled by a "
+              "member-services agent."},
+    {"figure": "AI cost per call", "key": "ai_cost",
+     "basis": "ASSUMPTIONS in generate_sample_company.py: telephony, speech, model and compute for one "
+              "AI-handled call."},
+    {"figure": "Member-services cost avoided", "key": "cost_avoided",
+     "basis": "Calls resolved by the agent times the difference between the two per-call costs above."},
+    {"figure": "Calls after hours", "key": "after_hours",
+     "basis": "Hourly call shape in scripts/sample_calls.py against member-services hours (8am-7pm Mon-Sat)."},
+    {"figure": "Fraud attempts stopped", "key": "fraud",
+     "basis": "Per-call rates in scripts/sample_calls.py (social engineering 0.45%, SIM swap 0.35%, account "
+              "takeover 0.3%) plus one SIM-swap campaign."},
+    {"figure": "Assets per member", "key": "assets_per_member",
+     "basis": "COMPANY in generate_sample_company.py: $1.4B in assets and 92,400 members."},
+    {"figure": "Members per branch", "key": "members_per_branch",
+     "basis": "COMPANY in generate_sample_company.py: 92,400 members and 11 branches."},
+]  # fmt: skip
+
 
 def _volume(rng: random.Random, d: date, drift: float) -> int:
     base = 1020 * drift * WEEKDAY_SHAPE[d.weekday()]
@@ -175,6 +216,64 @@ def _last_day_row(rng: random.Random, full: list[dict]) -> dict:
     out = {"date": END.isoformat(), **{k: row[k] for k in keys}}
     out["avg_answer_seconds"] = round(rng.uniform(0.8, 1.4), 1)
     return out
+
+
+def _money_short(n: float) -> str:
+    """The console's dashboard format (demo/format.js moneyShort): $1.4B, $1.46M, $93K."""
+    if n >= 1e9:
+        return f"${n / 1e9:.1f}B".replace(".0B", "B")
+    if n >= 1e6:
+        digits = 1 if n >= 1e7 else 2
+        return "$" + f"{n / 1e6:.{digits}f}".rstrip("0").rstrip(".") + "M"
+    if n >= 1e4:
+        return f"${round(n / 1e3)}K"
+    return f"${round(n):,}"
+
+
+def benchmark_rows(days: list[dict]) -> list[dict]:
+    """BENCHMARKS with each figure's value over the last 30 days, and its source or its assumption label."""
+    last = days[-30:]
+    calls = sum(d["calls"] for d in last)
+    contained = sum(d["contained"] for d in last)
+    handle = sum(d["avg_handle_seconds"] * d["calls"] for d in last) / calls
+    a = ASSUMPTIONS
+    values = {
+        "calls": f"{calls:,} in 30 days ({calls / COMPANY['members']:.2f} per member)",
+        "containment": f"{contained / calls * 100:.1f}%",
+        "avg_handle": f"{int(handle // 60)}m {round(handle % 60):02d}s",
+        "csat": f"{sum(d['csat'] * d['calls'] for d in last) / calls:.2f} / 5",
+        "agent_cost": f"${a['agent_cost_per_call_usd']:.2f}",
+        "ai_cost": f"${a['ai_cost_per_call_usd']:.2f}",
+        "cost_avoided": _money_short(contained * (a["agent_cost_per_call_usd"] - a["ai_cost_per_call_usd"])),
+        "after_hours": f"{sum(d['after_hours'] for d in last) / calls * 100:.1f}% of calls",
+        "fraud": f"{sum(d['fraud_blocked'] for d in last):,} in 30 days",
+        "assets_per_member": f"${COMPANY['assets_usd'] / COMPANY['members']:,.0f}",
+        "members_per_branch": f"{COMPANY['members'] / COMPANY['branches']:,.0f}",
+    }
+    rows = []
+    for b in BENCHMARKS:
+        source = b.get("source")
+        rows.append(
+            {
+                "figure": b["figure"],
+                "value": values[b["key"]],
+                "basis": b["basis"],
+                "status": "cited" if source else "assumption",
+                "label": "Calibrated to a published benchmark" if source else UNVERIFIED,
+                "source": source,
+            }
+        )
+    return rows
+
+
+def benchmarks_markdown(rows: list[dict]) -> str:
+    """The table in docs/console.md, between its benchmarks:start and benchmarks:end markers."""
+    lines = ["| Figure | In this sample (30 days) | What sets it | Source |", "|---|---|---|---|"]
+    for r in rows:
+        src = r["source"]
+        cell = f"[{src['title']}]({src['url']}), {src['publisher']}, {src['year']}" if src else r["label"]
+        lines.append(f"| {r['figure']} | {r['value']} | {r['basis']} | {cell} |")
+    return "\n".join(lines)
 
 
 # ---------- recent activity, written from the data ----------
@@ -381,6 +480,7 @@ def _generate() -> tuple[dict, dict]:
         "period": {"start": start.isoformat(), "end": END.isoformat(), "days": DAYS},
         "company": COMPANY,
         "assumptions": ASSUMPTIONS,
+        "benchmarks": benchmark_rows(days),
         "days": days,
         "intents": sorted(intents, key=lambda x: -x["calls_30d"]),
         "transfer_reasons": sorted(reasons, key=lambda x: (-x["calls_30d"], x["reason"])),

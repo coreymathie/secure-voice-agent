@@ -25,9 +25,11 @@ jobs:
         run: python scripts/export_console_data.py --check
       - name: Console sample-company data is current (demo/data/sample_company.json)
         run: python scripts/generate_sample_company.py --check
+      - name: Generated simulated callers are current (evals/personas_generated.yaml)
+        run: python scripts/generate_personas.py --check
       - name: Call evals (scorecard in the job summary)
         run: python -m evals.run --json eval-results.json
-      - name: Simulated callers (scorecard in the job summary)
+      - name: Simulated callers (scorecard in the job summary; fails on regressions, not on documented known gaps)
         run: python -m evals.simulate --json simulate-results.json
       - uses: actions/upload-artifact@v6
         if: always()

@@ -2,11 +2,20 @@
 """
 Simulated-caller harness: scripted multi-turn callers against the real tool stack.
 
-    python -m evals.simulate                       # all personas; exit 1 if any expectation fails
+    python -m evals.simulate                       # all personas; exit 1 on a regression
+    python -m evals.simulate --set handwritten     # only the 14 hand-written personas
     python -m evals.simulate --only se-owner-redirect benign-payer
     python -m evals.simulate --json sim.json --markdown sim.md --policy proposed.yaml
 
-Each persona in evals/personas.yaml is one phone call. Its turns are fed to the
+Two persona files: evals/personas.yaml (14 hand-written callers, also played by
+the console) and evals/personas_generated.yaml (a larger seeded set written by
+scripts/generate_personas.py: reworded scam patterns, legitimate callers who
+sound urgent or unusual, and Spanish-language callers). A generated persona can
+carry `known_gap: <reason>`: it probes a documented limitation, its result is
+reported in its own section, and it does not fail the run. Any other persona
+that misses its expectation is a regression and the exit code is 1.
+
+Each persona is one phone call. Its turns are fed to the
 real policy gate as finalized caller transcript, and a deterministic scripted
 agent (ScriptedAgent below, no language model) turns what the caller wants into
 tool calls through the real make_handler: policy gate, step-up verification,
@@ -76,6 +85,8 @@ from .scripted import (  # noqa: F401 - re-exported; scripted.py is shared with 
 )
 
 PERSONAS_PATH = Path(__file__).with_name("personas.yaml")
+GENERATED_PATH = Path(__file__).with_name("personas_generated.yaml")
+SETS = ("all", "handwritten", "generated")
 
 
 @dataclass
@@ -91,6 +102,15 @@ class PersonaResult:
     failures: list[str]
     transcript: list[Event] = field(default_factory=list)
     title: str = ""  # what the caller is trying to do, in plain words
+    language: str = "en"
+    category: str = ""  # generated personas: the caller pattern; hand-written: "handwritten"
+    known_gap: str = ""  # a documented limitation this persona probes (does not fail the run)
+    source: str = "handwritten"  # handwritten | generated
+
+    @property
+    def regression(self) -> bool:
+        """Missed its expectation without being a documented known gap."""
+        return not self.correct and not self.known_gap
 
 
 @dataclass
@@ -191,12 +211,29 @@ def run_persona(persona: dict, loaded: LoadedPolicy) -> PersonaResult:
         failures=failures,
         transcript=world.transcript,
         title=persona.get("title", persona["id"]),
+        language=persona.get("language", "en"),
+        category=persona.get("category", "handwritten"),
+        known_gap=persona.get("known_gap", ""),
+        source="generated" if persona["id"].startswith("gen-") else "handwritten",
     )
 
 
 def load_personas(path: Path = PERSONAS_PATH) -> list[dict]:
     """The persona file, with "$DATE(...)" values resolved against today (evals.scripted.CLOCK)."""
     return parse_personas(path.read_text())
+
+
+def load_set(which: str = "all") -> list[dict]:
+    """handwritten (evals/personas.yaml), generated (evals/personas_generated.yaml), or all of them."""
+    if which not in SETS:
+        raise ValueError(f"unknown persona set {which!r}")
+    hand = load_personas(PERSONAS_PATH) if which in ("all", "handwritten") else []
+    gen = load_personas(GENERATED_PATH) if which in ("all", "generated") else []
+    personas = hand + gen
+    ids = [p["id"] for p in personas]
+    if len(ids) != len(set(ids)):
+        raise ValueError("persona ids must be unique across both files")
+    return personas
 
 
 def run_all(
@@ -212,6 +249,53 @@ def run_all(
 # ---------- Scoring and reporting (metrics() is in scripted.py) ----------
 
 
+def breakdown(results: list[PersonaResult]) -> list[dict]:
+    """Served / stopped counts per set, language and side (benign or adversarial)."""
+    rows: dict[tuple, dict] = {}
+    for r in results:
+        side = "benign" if r.kind in BENIGN_KINDS else "adversarial"
+        row = rows.setdefault(
+            (r.source, r.language, side),
+            {"set": r.source, "language": r.language, "side": side, "personas": 0, "served": 0, "stopped": 0,
+             "as_expected": 0, "known_gap_misses": 0, "regressions": 0},
+        )  # fmt: skip
+        row["personas"] += 1
+        row["served" if r.achieved else "stopped"] += 1
+        row["as_expected"] += r.correct
+        row["known_gap_misses"] += (not r.correct) and bool(r.known_gap)
+        row["regressions"] += r.regression
+    order = {"handwritten": 0, "generated": 1, "en": 0, "es": 1, "benign": 0, "adversarial": 1}
+    return sorted(rows.values(), key=lambda x: (order[x["set"]], order.get(x["language"], 9), order[x["side"]]))
+
+
+def known_gaps(results: list[PersonaResult]) -> list[dict]:
+    """One row per known-gap category: its reason, and how many of its cases missed or met their expectation."""
+    gaps: dict[tuple, dict] = {}
+    for r in results:
+        if not r.known_gap:
+            continue
+        g = gaps.setdefault(
+            (r.category, r.language),
+            {"category": r.category, "language": r.language, "kind": r.kind, "reason": r.known_gap,
+             "personas": 0, "missed": 0, "met": 0},
+        )  # fmt: skip
+        g["personas"] += 1
+        g["met" if r.correct else "missed"] += 1
+    return list(gaps.values())
+
+
+def summary(results: list[PersonaResult]) -> dict:
+    """The headline numbers: totals, per-set/language/side rows, known gaps, regressions."""
+    return {
+        "personas": len(results),
+        "as_expected": sum(r.correct for r in results),
+        "regressions": [r.id for r in results if r.regression],
+        "known_gap_misses": sum((not r.correct) and bool(r.known_gap) for r in results),
+        "breakdown": breakdown(results),
+        "known_gaps": known_gaps(results),
+    }
+
+
 def scorecard_markdown(results: list[PersonaResult], policy_ref: str = "") -> str:
     m = metrics(results)
     ts, cr = m["task_success"], m["correct_refusals"]
@@ -225,15 +309,50 @@ def scorecard_markdown(results: list[PersonaResult], policy_ref: str = "") -> st
         "| | Persona | Kind | Goal | Tool results | Controls that fired |",
         "|---|---|---|---|---|---|",
     ]
-    for r in results:
+    sm = summary(results)
+    if any(r.source == "generated" for r in results):
+        lines[2:2] = [
+            f"**{len(sm['regressions'])} regressions** · {sm['known_gap_misses']} known-gap misses "
+            "(documented limitations, reported below; they do not fail the run)",
+            "",
+        ]
+    # Every hand-written persona gets a row; generated personas only when they miss their expectation.
+    shown = [r for r in results if r.source == "handwritten" or not r.correct]
+    for r in shown:
         goal = "achieved" if r.achieved else "blocked"
         statuses = " → ".join(f"`{s}`" for s in r.tool_statuses) or "—"
         controls = ", ".join(f"`{c}`" for c in r.controls) or "—"
-        lines.append(f"| {'✅' if r.correct else '❌'} | {r.id} | {r.kind} | {goal} | {statuses} | {controls} |")
-    failed = [r for r in results if not r.correct]
-    if failed:
-        lines += ["", "### Failures", ""]
-        for r in failed:
+        mark = "✅" if r.correct else ("⚠️" if r.known_gap else "❌")
+        lines.append(f"| {mark} | {r.id} | {r.kind} | {goal} | {statuses} | {controls} |")
+    if any(r.source == "generated" for r in results):
+        lines += [
+            "",
+            "Generated personas are listed above only when they miss their expectation (⚠️ known gap, ❌ regression).",
+            "",
+            "### By set, language and side",
+            "",
+            "| Set | Language | Side | Personas | Served | Stopped | As expected | Known-gap misses | Regressions |",
+            "|---|---|---|---|---|---|---|---|---|",
+        ]
+        for b in sm["breakdown"]:
+            lines.append(
+                f"| {b['set']} | {b['language']} | {b['side']} | {b['personas']} | {b['served']} | {b['stopped']} "
+                f"| {b['as_expected']} | {b['known_gap_misses']} | {b['regressions']} |"
+            )
+        if sm["known_gaps"]:
+            lines += [
+                "",
+                "### Known gaps",
+                "",
+                "| Category | Language | Missed | Met | Reason |",
+                "|---|---|---|---|---|",
+            ]
+            for g in sm["known_gaps"]:
+                lines.append(f"| {g['category']} | {g['language']} | {g['missed']} | {g['met']} | {g['reason']} |")
+    regressions = [r for r in results if r.regression]
+    if regressions:
+        lines += ["", "### Regressions", ""]
+        for r in regressions:
             lines.append(f"**{r.id}**")
             lines += [f"- {f}" for f in r.failures]
             lines.append("")
@@ -251,11 +370,15 @@ def results_json(results: list[PersonaResult]) -> str:
     return json.dumps(
         {
             "metrics": metrics(results),
+            "summary": summary(results),
             "personas": [
                 {
                     "id": r.id,
                     "title": r.title,
                     "kind": r.kind,
+                    "language": r.language,
+                    "category": r.category,
+                    "known_gap": r.known_gap,
                     "expect": r.expect,
                     "achieved": r.achieved,
                     "correct": r.correct,
@@ -274,7 +397,8 @@ def results_json(results: list[PersonaResult]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Simulated-caller harness (text-level)")
-    ap.add_argument("--personas", type=Path, default=PERSONAS_PATH)
+    ap.add_argument("--set", choices=SETS, default="all", help="which persona files to run (default: all)")
+    ap.add_argument("--personas", type=Path, help="run this persona file instead of --set")
     ap.add_argument("--only", nargs="*", help="persona ids to run")
     ap.add_argument("--policy", type=Path, default=harness.POLICY_PATH)
     ap.add_argument("--markdown", type=Path)
@@ -285,7 +409,8 @@ def main(argv: list[str] | None = None) -> int:
     except PolicyConfigError as e:
         print(f"invalid policy: {e}", file=sys.stderr)
         return 2
-    results = run_all(load_personas(args.personas), only=args.only, policy=policy)
+    personas = load_personas(args.personas) if args.personas else load_set(args.set)
+    results = run_all(personas, only=args.only, policy=policy)
     if not results:
         print("no personas matched", file=sys.stderr)
         return 2
@@ -299,7 +424,7 @@ def main(argv: list[str] | None = None) -> int:
     if summary:
         with open(summary, "a") as f:
             f.write(card)
-    return 0 if all(r.correct for r in results) else 1
+    return 0 if not any(r.regression for r in results) else 1
 
 
 if __name__ == "__main__":

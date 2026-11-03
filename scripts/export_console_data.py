@@ -6,7 +6,8 @@ screens show in demo mode (GitHub Pages has no backend to run them).
 Everything in the file comes from running the repo's own checks:
 
   call_evals          python -m evals.run's harness (31 scenarios, real Lambda handler code)
-  simulated_callers   python -m evals.simulate's harness (14 personas, transcripts included)
+  simulated_callers   python -m evals.simulate's harness (the 14 hand-written personas, transcripts included)
+  simulated_callers_all  the same harness over every persona file (hand-written + generated): counts only
   mutation_tests      the mutation tests in tests/test_evals.py and tests/test_simulate.py
   pytest              the whole suite's pass/fail/skip counts
 
@@ -34,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 OUT = ROOT / "demo" / "data" / "evals.json"
 MUTATION = re.compile(r"^test_(evals_catch|simulator_catches|simulator_measures)_(.+)$")
-DETERMINISTIC = ("policy", "call_evals", "simulated_callers")
+DETERMINISTIC = ("policy", "call_evals", "simulated_callers", "simulated_callers_all")
 
 
 def _version() -> str:
@@ -49,6 +50,7 @@ def run_evals() -> dict:
     policy = load_policy(harness.POLICY_PATH)
     scenarios = json.loads(harness.results_json(harness.run_all(policy=policy)))
     personas = json.loads(simulate.results_json(simulate.run_all(policy=policy)))
+    everyone = simulate.run_all(simulate.load_set("all"), policy=policy)
     return {
         "policy": {
             "source": "config/policy.yaml",
@@ -56,7 +58,12 @@ def run_evals() -> dict:
             "ref": policy.version_ref,
         },
         "call_evals": {"command": "python -m evals.run", **scenarios},
-        "simulated_callers": {"command": "python -m evals.simulate", **personas},
+        "simulated_callers": {"command": "python -m evals.simulate --set handwritten", **personas},
+        "simulated_callers_all": {
+            "command": "python -m evals.simulate",
+            "metrics": simulate.metrics(everyone),
+            **simulate.summary(everyone),
+        },
     }
 
 

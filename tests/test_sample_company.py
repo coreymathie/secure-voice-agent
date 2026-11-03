@@ -74,3 +74,31 @@ def test_recent_calls_match_the_dashboard():
         if "Fraud stopped" in c["flags"]:
             assert c["outcome"] == "transferred"
             assert not any(a["tool"] == "take_payment" for a in c["actions"])
+
+
+# ---------- How these sample numbers were set ----------
+
+
+def test_every_headline_figure_has_a_benchmark_row():
+    data = gen.build()
+    figures = [b["figure"] for b in data["benchmarks"]]
+    assert len(figures) == len(set(figures)) == len(gen.BENCHMARKS) >= 10
+    for b in data["benchmarks"]:
+        assert b["value"] and b["basis"] and b["status"] in ("cited", "assumption"), b
+
+
+def test_every_cited_figure_has_a_url_and_the_quoted_sentence():
+    """A row may cite a source only with its title, publisher, year, URL and the sentence the figure comes from."""
+    for b in gen.build()["benchmarks"]:
+        if b["status"] == "cited":
+            src = b["source"]
+            assert src["url"].startswith("https://"), b["figure"]
+            assert src["title"] and src["publisher"] and str(src["year"]).isdigit() and src["quote"], b["figure"]
+        else:
+            assert b["source"] is None and b["label"] == gen.UNVERIFIED, b["figure"]
+
+
+def test_docs_table_matches_the_data():
+    doc = (gen.ROOT / "docs" / "console.md").read_text()
+    table = doc.split("<!-- benchmarks:start -->\n", 1)[1].split("\n<!-- benchmarks:end -->", 1)[0]
+    assert table == gen.benchmarks_markdown(gen.build()["benchmarks"])

@@ -49,9 +49,10 @@ def test_each_adversary_is_stopped_by_the_control_it_targets(results):
     assert "pii_scrubbed" in by_id["benign-card-in-ticket"].controls
 
 
-def test_personas_use_only_reserved_numbers_and_example_domains():
+@pytest.mark.parametrize("path", [simulate.PERSONAS_PATH, simulate.GENERATED_PATH], ids=["handwritten", "generated"])
+def test_personas_use_only_reserved_numbers_and_example_domains(path):
     """555-0100 to 555-0199 is reserved for fiction; members are in South Florida area codes."""
-    text = simulate.PERSONAS_PATH.read_text()
+    text = path.read_text()
     numbers = re.findall(r"\+1\d{10}", text)
     assert numbers
     for number in numbers:
@@ -131,3 +132,72 @@ def test_simulator_measures_false_positives_from_an_over_eager_policy(tmp_path):
     results = simulate.run_all(policy=load_policy(weak))
     m = simulate.metrics(results)
     assert m["false_positive_rate"] > 0 and "benign-payment-due-today" in m["false_positives"]
+
+
+# ---------- The generated set (evals/personas_generated.yaml) ----------
+
+
+@pytest.fixture(scope="module")
+def generated():
+    personas = simulate.load_personas(simulate.GENERATED_PATH)
+    return personas, simulate.run_all(personas)
+
+
+def test_generated_personas_are_current():
+    """The checked-in file is exactly what the seeded generator writes (CI also runs it with --check)."""
+    from scripts import generate_personas
+
+    assert simulate.GENERATED_PATH.read_text() == generate_personas.render()
+    assert generate_personas.main(["--check"]) == 0
+
+
+def test_generated_personas_are_well_formed(generated):
+    personas, _ = generated
+    assert 300 <= len(personas) + len(simulate.load_personas()) <= 400
+    assert {p["language"] for p in personas} == {"en", "es"}
+    for p in personas:
+        assert p["id"].startswith("gen-") and p["turns"] and p["goal"] and p["title"] and p["category"], p["id"]
+        # expectations follow from who the caller is, never from what the code does
+        assert p["expect"] == ("achieved" if p["kind"] in simulate.BENIGN_KINDS else "blocked"), p["id"]
+        assert isinstance(p.get("known_gap", ""), str), p["id"]
+    sides = {(p["language"], p["kind"] in simulate.BENIGN_KINDS) for p in personas}
+    assert sides == {("en", True), ("en", False), ("es", True), ("es", False)}
+
+
+def test_generated_set_has_no_regressions(generated):
+    """Every generated persona without known_gap meets its expectation on the shipped policy."""
+    _, results = generated
+    assert {r.id: r.failures for r in results if r.regression} == {}
+
+
+def test_known_gaps_are_documented(generated):
+    """Each known-gap category is explained in docs/simulation.md, and at least one of its cases shows the gap."""
+    _, results = generated
+    doc = (simulate.PERSONAS_PATH.parents[1] / "docs" / "simulation.md").read_text()
+    for gap in simulate.known_gaps(results):
+        assert f"`{gap['category']}`" in doc, gap["category"]
+        assert gap["missed"] >= 1, gap  # a gap that no longer shows should lose its known_gap flag
+
+
+def test_the_spanish_gap_is_reported_as_a_failure_not_hidden(generated):
+    _, results = generated
+    spanish_scams = [r for r in results if r.language == "es" and r.kind in simulate.ADVERSARIAL_KINDS]
+    got_through = [r for r in spanish_scams if r.achieved]
+    assert got_through and all(not r.correct and r.known_gap for r in got_through)
+    card = simulate.scorecard_markdown(results)
+    assert "### Known gaps" in card and "English only" in card
+
+
+def test_cli_fails_only_on_regressions(capsys):
+    # known-gap misses alone do not fail the run
+    assert simulate.main(["--only", "gen-pressure-script-es-01", "gen-anxious-member-en-01"]) == 0
+    capsys.readouterr()
+
+
+def test_breakdown_adds_up(generated):
+    _, results = generated
+    rows = simulate.breakdown(results)
+    assert sum(r["personas"] for r in rows) == len(results)
+    for r in rows:
+        assert r["served"] + r["stopped"] == r["personas"]
+        assert r["as_expected"] + r["known_gap_misses"] + r["regressions"] == r["personas"]
