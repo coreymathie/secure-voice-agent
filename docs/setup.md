@@ -1,6 +1,6 @@
 # Setup
 
-This document takes a local development environment from zero to a working voice agent on a real phone number. It runs the voice process on a workstation behind a tunnel; production deployment is in [`deploy.md`](deploy.md).
+This document describes how to take a local development environment from zero to a voice agent answering a Twilio number you own. It runs the voice process on a workstation behind a tunnel; production deployment is in [`deploy.md`](deploy.md). These are setup instructions: the repository's evidence comes from text-level evals and simulated callers, and none of it was produced on a live phone line.
 
 ## 1. Prerequisites
 

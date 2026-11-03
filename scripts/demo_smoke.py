@@ -4,7 +4,8 @@ Browser smoke test for the console (demo/), in both modes.
 
 Demo mode: serves the repo root with Python's http.server, opens /demo/ in
 headless Chromium (Playwright), waits for Pyodide to import the repo's real
-modules, and visits every screen doing its key interaction: Overview (tiles,
+modules, checks that the console opens on Evals (the measured call evals and
+mutation tests), and visits every screen doing its key interaction: Overview (tiles,
 charts, latest calls), Calls (the sample member calls: filters, search, paging,
 CSV export, the call page with its transcript replay and safeguards), the Test
 line (a test call through step-up and a payment, a balance question, social
@@ -14,7 +15,8 @@ Policies (preset edit, validate, apply, compare, an invalid file), Evals, and
 Settings. It also checks the guided tour, the business and technical views, dark
 mode, browser back, an unknown address, no horizontal scroll at 390px and
 1366px, that the overview and member calls still work when the Pyodide download
-is blocked, and that the page logged no errors.
+is blocked, that a fr-FR browser still shows money as "$…" with figures marked
+translate="no", and that the page logged no errors.
 
 Live mode (--live): starts src/console_server.py with uvicorn on a free port,
 opens /console/?mode=live, and exercises Overview, Playground (signed requests to
@@ -161,15 +163,38 @@ def _watch(page, errors: list[str], port: int) -> None:
 # ---------- demo mode ----------
 
 
+def landing(s: Smoke, label: str) -> None:
+    """The console opens on the measured safety tests, not on the sample dashboard."""
+    page = s.page
+    page.wait_for_selector("section[aria-labelledby='ce-h'] tbody tr")
+    s.check(f"{label}: opens on Evals (#/evals)", page.url.endswith("#/evals") and s.text("main h1") == "Evals")
+    s.check(
+        f"{label}: landing shows the 31 measured call evals",
+        page.locator("section[aria-labelledby='ce-h'] tbody tr").count() == 31 and "measured" in s.text("main"),
+    )
+    s.check(
+        f"{label}: landing lists the mutation tests",
+        page.locator("section[aria-labelledby='mt-h'] tbody tr").count() >= 22,
+    )
+
+
 def demo_desktop(s: Smoke) -> None:
     page = s.page
+    landing(s, "demo")
     offered = page.is_visible("#tour-invite") and page.is_hidden("#tour")
     s.check("tour is offered, not forced, on the first visit", offered)
     page.click("#tour-invite-start")
-    s.check("tour starts on the overview", page.is_visible("#tour") and "step 1" in s.text("#tour-step").lower())
+    page.wait_for_selector("#ce-h.tour-target")
+    s.check("tour starts on the measured evals", page.is_visible("#tour") and "step 1" in s.text("#tour-step").lower())
+    page.click("#tour-next")
+    page.wait_for_selector(".tiles.kpis.tour-target")
+    s.check(
+        "tour step 2 opens the sample business view",
+        page.url.endswith("#/overview") and "Sample business view" in s.text("#tour-title"),
+    )
     page.click("#tour-next")
     page.wait_for_selector("table.calls.tour-target")
-    s.check("tour step 2 opens the calls it describes", page.url.endswith("#/calls"))
+    s.check("tour step 3 opens the calls it describes", page.url.endswith("#/calls"))
     page.click("#tour-skip")
     s.check("tour can be dismissed", page.is_hidden("#tour"))
     s.check("tour dismissal is remembered", page.evaluate("localStorage.getItem('sva-tour-done')") == "1")
@@ -187,9 +212,10 @@ def demo_desktop(s: Smoke) -> None:
     s.check("dark mode toggles", page.evaluate("document.documentElement.dataset.theme") in ("dark", "light"))
     page.click("#theme-btn")
 
-    # Overview: business impact for the sample company
+    # Overview: the sample business view for the sample company
     s.goto("overview", "#chart-volume svg")
     s.idle()
+    s.check("business: tab is labelled as a sample", s.text("#ovtab-business") == "Sample business view")
     s.check("business: sample company labelled fictional", "fictional" in s.text(".sample-banner").lower())
     s.check("business: eight KPI tiles", page.locator(".tiles.kpis .tile").count() == 8)
     s.check("business: volume chart drawn", page.locator("#chart-volume svg .mark").count() >= 60)
@@ -534,11 +560,51 @@ def mobile_pass(s: Smoke, prefix: str) -> None:
     page.wait_for_function("document.getElementById('drawer').hidden")
 
 
+def french_locale(s: Smoke) -> None:
+    page = s.page
+    s.check(
+        "browser reports fr-FR", page.evaluate("navigator.language") == "fr-FR", page.evaluate("navigator.language")
+    )
+    tiles = page.locator(".tiles.kpis .tile")
+    values = {
+        tiles.nth(i).locator(".k").inner_text(): tiles.nth(i).locator(".v").inner_text() for i in range(tiles.count())
+    }
+    money = [values.get("Payments collected", ""), values.get("Member-services cost avoided", "")]
+    s.check("KPI money tiles read $… (en-US)", all(re.fullmatch(r"\$\d[\d.,]*[KMB]?", v) for v in money), str(money))
+    s.check(
+        "KPI counts use en-US separators",
+        re.fullmatch(r"\d{1,3}(,\d{3})*", values.get("Calls answered by the agent", "")) is not None,
+        str(values),
+    )
+    cost = page.locator(".tiles.kpis .tile", has_text="cost avoided").locator(".s").inner_text()
+    s.check(
+        "unit prices keep two decimals and a leading $",
+        re.search(r"at \$\d+\.\d\d per agent call vs \$\d+\.\d\d per AI call", cost) is not None,
+        cost,
+    )
+    s.check("no USD in the KPI tiles", "USD" not in s.text(".tiles.kpis"), s.text(".tiles.kpis")[:300])
+    untranslated = page.evaluate(
+        """() => {
+          const sel = ['.tiles.kpis .tile .v', '.tiles.kpis .tile .s', '#chart-volume svg', 'table.intents td.num'];
+          return sel.map((q) => [q, document.querySelectorAll(q).length,
+            Array.from(document.querySelectorAll(q)).every((n) => n.closest('[translate="no"]'))]);
+        }"""
+    )
+    s.check('figure elements carry translate="no"', all(n > 0 and ok for _, n, ok in untranslated), str(untranslated))
+    banner = page.locator(".sample-banner [translate='no']").all_inner_texts()
+    s.check("inline money in the banner is marked", any(t.startswith("$") for t in banner), str(banner))
+    s.check(
+        "prose stays translatable",
+        page.evaluate("!document.querySelector('.sample-banner p').closest('[translate=\"no\"]')"),
+    )
+
+
 # ---------- live mode ----------
 
 
 def live_desktop(s: Smoke) -> None:
     page = s.page
+    landing(s, "live")
     s.check("live: mode badge says live", "Live · " in s.text("#mode-badge"), s.text("#mode-badge"))
     s.goto("overview", "#chart-volume svg")
     s.check("live: business view loads the sample company", page.locator(".tiles.kpis .tile").count() == 8)
@@ -630,7 +696,10 @@ def run(args: argparse.Namespace) -> int:
                 page.goto(f"http://127.0.0.1:{port}/demo/?notour")
                 s = Smoke(page, shots, "engine blocked")
                 results.append(s)
-                page.wait_for_selector(".tiles.kpis")
+                landing(s, "measured evals without the Python runtime")
+                page.wait_for_selector("#ev-wait >> text=couldn't start")
+                s.check("evals: says re-running needs the engine", "couldn't start" in s.text("#ev-wait"))
+                s.goto("overview", ".tiles.kpis")
                 s.check("overview renders without the Python runtime", page.locator(".tiles.kpis .tile").count() == 8)
                 s.goto("calls", "table.calls tbody tr")
                 s.check("member calls render without it", page.locator("table.calls tbody tr").count() == 25)
@@ -638,6 +707,19 @@ def run(args: argparse.Namespace) -> int:
                 page.wait_for_selector(".engine-wait.error")
                 s.check("test line explains the blocked download", "couldn't start" in s.text(".engine-wait").lower())
                 s.check("badge says the engine is offline", "offline" in s.text("#mode-badge").lower())
+                ctx.close()
+                # A French browser, as page translation would see it: money stays "$…" and figures carry translate="no"
+                ctx = browser.new_context(
+                    viewport={"width": 1366, "height": 900}, device_scale_factor=1, locale="fr-FR"
+                )
+                page = ctx.new_page()
+                page.set_default_timeout(timeout)
+                page.route(CDN + "**", lambda route: route.abort())
+                page.goto(f"http://127.0.0.1:{port}/demo/?notour#/overview")
+                s = Smoke(page, shots, "fr-FR locale")
+                results.append(s)
+                page.wait_for_selector("#chart-volume svg")
+                french_locale(s)
                 ctx.close()
             finally:
                 srv.shutdown()

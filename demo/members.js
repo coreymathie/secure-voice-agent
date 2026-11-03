@@ -1,14 +1,13 @@
 // Corey Mathie, 2026
 // Member calls: the call list and the call detail page for the sample credit union's recent calls.
 // Static data (demo/data/sample_calls.json), so these screens work before, or without, the Python runtime.
+import {num, usdCents as usd} from "./format.js";
 import {callIndex, clock, dayLabel, loadCalls, shifted} from "./sample.js";
 
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => Array.from(root.querySelectorAll(s));
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-const num = (n) => Number(n || 0).toLocaleString("en-US");
 const mss = (s) => `${Math.floor(s / 60)}:${String(Math.round(s % 60)).padStart(2, "0")}`;
-const usd = (n) => "$" + Number(n || 0).toLocaleString("en-US", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const maskPhone = (p) => p.replace(/\) (\d{3})-(\d{2})/, ") •••-••");
 const PAGE = 25;
 
@@ -118,7 +117,7 @@ export async function renderMemberCalls(view, {head, tabs, go}) {
   const intents = [...new Set(calls.map((c) => c.intent))].sort();
   view.innerHTML = head("Calls", lede, '<button type="button" id="mc-export">Export CSV</button>') + tabs + `
     <section class="strip" aria-label="${esc(day)} so far">
-      <div><span class="k">${esc(day)}, latest calls</span><b>${num(calls.length)}</b></div>
+      <div><span class="k">${esc(day)}, latest calls</span><b translate="no">${num(calls.length)}</b></div>
       <div><span class="k">Resolved by the agent</span><b>${Math.round((resolved / calls.length) * 100)}%</b></div>
       <div><span class="k">Average length</span><b>${mss(avgDur)}</b></div>
       <div><span class="k">Fraud attempts stopped</span><b>${fraud}</b></div>
@@ -254,7 +253,7 @@ export async function renderMemberCall(view, id, {go, crumbsHome}) {
           ${c.qa_tags.length ? `<div class="chips qa">${c.qa_tags.map((t) => `<span class="chip neutral">${esc(t)}</span>`).join("")}</div>` : ""}
         </section>
         <section class="card" aria-labelledby="act-h"><div class="card-head"><h2 id="act-h">What the agent did</h2></div>
-          ${c.actions.length ? `<ul class="acts">${c.actions.map((a) => `<li><span class="pill ok">${esc({link_sent: "Link sent", keypad_paid: "Paid", created: "Case opened", booked: "Booked", logged: "Callback set", updated: "Updated"}[a.status] || a.status)}</span><div><b>${esc(a.detail)}</b>${a.amount_usd ? `<span class="hint"> ${usd(a.amount_usd)}</span>` : ""}${a.ticket ? `<span class="hint"> · case ${esc(a.ticket)}</span>` : ""}<span class="sub tech-only mono">${esc(a.tool)} → ${esc(a.status)}</span></div></li>`).join("")}</ul>` : '<p class="hint">No account changes or payments on this call.</p>'}
+          ${c.actions.length ? `<ul class="acts">${c.actions.map((a) => `<li><span class="pill ok">${esc({link_sent: "Link sent", keypad_paid: "Paid", created: "Case opened", booked: "Booked", logged: "Callback set", updated: "Updated"}[a.status] || a.status)}</span><div><b>${esc(a.detail)}</b>${a.amount_usd ? `<span class="hint" translate="no"> ${usd(a.amount_usd)}</span>` : ""}${a.ticket ? `<span class="hint"> · case ${esc(a.ticket)}</span>` : ""}<span class="sub tech-only mono">${esc(a.tool)} → ${esc(a.status)}</span></div></li>`).join("")}</ul>` : '<p class="hint">No account changes or payments on this call.</p>'}
         </section>
         <section class="card" aria-labelledby="sg-h"><div class="card-head"><h2 id="sg-h">Safeguards</h2><span class="hint">${c.safeguards.filter((g) => g.kind !== "pass").length ? `${c.safeguards.filter((g) => g.kind !== "pass").length} stepped in` : "all checks passed"}</span></div>
           <ol class="guards">${c.safeguards.map((g) => `<li class="k-${esc(g.kind)}"><span class="gi" aria-hidden="true">${KIND_ICON[g.kind] || "•"}</span><div><b>${esc(g.control)}</b><span class="hint">${esc(g.result)}</span></div><span class="ts mono">${mss(g.t)}</span></li>`).join("")}</ol>
