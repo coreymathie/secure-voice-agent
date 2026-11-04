@@ -20,7 +20,8 @@ Code: [`src/safeguards/step_up.py`](../src/safeguards/step_up.py), the step-up r
                              │  no record / no phone on file ─────────▶ require_human
                              ▼
                             RiskSignalProvider.signals(record, phone on file)
-                             │  recent_sim_swap / recent_number_port ─▶ require_human
+                             │  recent_sim_swap / recent_number_port /
+                             │  recent_contact_change / device_reported_lost ─▶ require_human
                              ▼
                             Verifier.start(phone on file, sms|call)   ← never a number from the caller or model
    │
@@ -61,7 +62,7 @@ This is an engineering reading of SP 800-63B (Digital Identity Guidelines, Authe
 
 - **Authenticator type.** A code sent by SMS or a voice call is an out-of-band authenticator that uses the public switched telephone network (PSTN). SP 800-63B classifies PSTN delivery as a **restricted** authenticator because of SIM swap, number porting, and SS7-style interception.
 - **Pre-registered destination.** The out-of-band secret has to go to a number associated with the subscriber beforehand, not one supplied during the authentication. Here that is `phone_on_file` from the CRM record; the caller's number and the model's arguments are never used as the destination.
-- **Risk indicators before using the PSTN.** SP 800-63B says verifiers should consider indicators such as device swap, SIM change, and number porting before sending a secret over the PSTN. That is the `RiskSignalProvider` hook: if it reports `recent_sim_swap`, `recent_number_port`, or `recent_contact_change` for the number on file, no code is sent and the call hands off.
+- **Risk indicators before using the PSTN.** SP 800-63B says verifiers should consider indicators such as device swap, SIM change, and number porting before sending a secret over the PSTN. That is the `RiskSignalProvider` hook: if it reports `recent_sim_swap`, `recent_number_port`, `recent_contact_change`, or `device_reported_lost` (the member has reported the phone on file lost or stolen, a flag on the member's own record) for the number on file, no code is sent and the call hands off. A stolen phone that has not been reported yet raises no signal: whoever holds it passes the code check, which is the residual risk of possession-based verification (`docs/simulation.md`, `stolen-phone-calm`).
 - **Secret properties.** Codes are random, at least 6 digits, single use, and short-lived (10 minutes by default here).
 - **Rate limiting.** SP 800-63B requires limiting consecutive failed attempts. This design is much stricter than the guideline's ceiling: 3 per call, then lockout, plus a per-number velocity limit across calls.
 - **Not covered:** identity proofing (who the customer is in the first place), phishing resistance (a caller can be socially engineered into reading their code to an attacker), and authenticator lifecycle (binding, rebinding, and revoking the number on file) are outside this repository.

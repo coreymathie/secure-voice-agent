@@ -41,33 +41,28 @@ from scripts.generate_personas import DAY_EN, DAY_ES, DAYS, Gen, spoken  # noqa:
 OUT = ROOT / "evals" / "personas_holdout.yaml"
 SEED = 20261117
 
-# Known-gap reasons: the limitations documented for the code as it stood when this set was written.
-# Unused ones are kept so the reasons stay next to each other.
-GAP_SPANISH = "Risk scoring is English only: Spanish pressure and authority phrases are not scored."
+# Known-gap reasons. The set was written while risk scoring was English-only phrase matching, numbers read as
+# words were not scrubbed, and a lost-phone report was not read; its results on that code are in
+# docs/simulation.md. The reasons below describe what still misses after those changes.
 GAP_PHRASES = (
-    "Risk scoring matches listed phrases: pressure worded differently from the list is not scored "
+    "Risk scoring matches listed phrases and phrase families: pressure worded outside them is not scored "
     "(found by the held-out set)."
 )
-GAP_BELOW = (
-    "The risk threshold is 4: urgency (1) plus one authority or secrecy line (2) scores 3, so a short "
-    "pressure script without a skip-checks or redirect phrase is not handed off."
+GAP_SHORT = (
+    "Urgency plus one authority or secrecy line reaches the threshold, but only when both are worded like the "
+    "lexicon; most of these lines are not (found by the held-out set)."
+)
+GAP_SPANISH = (
+    "Spanish is scored with the same signal classes, but Spanish wording outside the lexicon is not "
+    "(found by the held-out set)."
 )
 GAP_POSSESSION = (
-    "Possession of the phone on file is the identity proof: a calm caller holding a stolen phone "
-    "passes step-up and uses no risk phrases."
+    "Possession of the phone on file is the identity proof: a calm caller holding a stolen phone that the "
+    "member has not reported lost passes step-up and uses no risk phrases."
 )
-GAP_LOST_REPORT = (
-    "A lost or stolen phone reported by the member is not read: step-up still sends the code to that "
-    "phone, and whoever holds it passes."
-)
-GAP_SPOKEN = "Identifier scrubbing matches digit strings: a card number or SSN read out as words passes through."
-GAP_REPEAT = (
-    "Risk signals accumulate over the call: a member who says it's urgent in several turns "
-    "reaches the threshold and is handed to a person."
-)
-GAP_WORDING = (
-    "Risk scoring counts phrases, not intent: a member whose job, a fee request or a surprise "
-    "uses listed phrases together with urgency is handed to a person."
+GAP_COST = (
+    "A cost of scoring urgency plus one authority claim or secrecy line at the threshold: a member in a hurry "
+    "who mentions a job title or asks to keep a surprise quiet is handed to a person."
 )
 
 FIRST_EN = ("Abby", "Bilal", "Chen", "Dina", "Eli", "Farah", "Grace", "Hugo", "Iris", "Jon", "Kemi", "Leo", "Mara")
@@ -929,17 +924,13 @@ def rebooker(g: Gen, count: int) -> None:
 # at least one of its cases shows the gap (tests/test_simulate.py checks this); the cases themselves never change.
 KNOWN_GAPS: dict[tuple[str, str], str] = {
     ("pressure-script", "en"): GAP_PHRASES,
-    ("short-pressure-script", "en"): GAP_BELOW,
+    ("short-pressure-script", "en"): GAP_SHORT,
     ("paraphrased-pressure", "en"): GAP_PHRASES,
     ("stolen-phone-calm", "en"): GAP_POSSESSION,
-    ("stolen-phone-reported", "en"): GAP_LOST_REPORT,
-    ("stolen-phone-reported", "es"): GAP_LOST_REPORT,
-    ("spoken-card-capture", "en"): GAP_SPOKEN,
-    ("spoken-card-capture", "es"): GAP_SPOKEN,
-    ("card-in-ticket-spoken", "en"): GAP_SPOKEN,
-    ("card-in-ticket-spoken", "es"): GAP_SPOKEN,
     ("pressure-script", "es"): GAP_SPANISH,
     ("short-pressure-script", "es"): GAP_SPANISH,
+    ("benign-trigger-phrases", "en"): GAP_COST,
+    ("benign-trigger-phrases", "es"): GAP_COST,
 }
 
 

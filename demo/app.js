@@ -1398,7 +1398,8 @@ async function renderEvals(view) {
     <div class="table-wrap"><table><thead><tr><th></th><th>Persona</th><th>Kind</th><th>Goal</th><th>Tool results</th><th class="hide-sm">Controls</th></tr></thead><tbody>
     ${sc.personas.map((p) => `<tr><td>${p.correct ? '<span class="ok-mark">✓</span>' : '<span class="bad-mark">✗</span>'}</td><td class="wrap">${esc(p.title || p.id)}<span class="sub mono tech-only">${esc(p.id)}</span></td><td><span class="tag">${esc(p.kind.replace("_", " "))}</span></td><td>${esc(p.achieved ? "achieved" : "blocked")}<span class="sub">expected ${esc(p.expect)}</span></td><td>${statusChain(p.tool_statuses)}</td><td class="hide-sm">${p.controls.length ? `<span class="chips">${p.controls.map((x) => `<span class="chip neutral">${esc(controlName(x))}</span>`).join("")}</span>` : ""}</td></tr>`).join("")}
     </tbody></table></div></section>
-  ${allCallersHtml(c.simulated_callers_all)}`;
+  ${allCallersHtml(c.simulated_callers_all)}
+  ${heldOutHtml(c.simulated_callers_holdout, c.simulated_callers_all, c.simulated_callers_before_change)}`;
   $("#ev-run")?.addEventListener("click", (e) => act(async () => {
     S.evalsLive = await call("evals_run");
     toast(`Evals re-run on the server: ${S.evalsLive.call_evals.passed}/${S.evalsLive.call_evals.total}`);
@@ -1416,26 +1417,50 @@ async function renderEvals(view) {
   }, e.currentTarget));
 }
 
-// The whole simulated-caller set (hand-written + seeded generator), counts only: by set, language and side.
-function allCallersHtml(all) {
-  if (!all || !all.breakdown) return "";
+// A simulated-caller set, counts only: by set, language and side, plus its known gaps.
+const SIM_LANG = {en: "English", es: "Spanish"};
+const SIM_SET = {handwritten: "Hand-written", generated: "Generated", holdout: "Held-out"};
+function simSetBody(all, ids) {
   const m = all.metrics;
-  const LANG = {en: "English", es: "Spanish"};
-  const SET = {handwritten: "Hand-written", generated: "Generated"};
-  return `<section class="card" aria-labelledby="sa-h"><div class="card-head"><h2 id="sa-h">All simulated callers · ${num(all.personas)}</h2><span class="hint" translate="no">${num(all.regressions.length)} regressions · ${num(all.known_gap_misses)} known-gap misses</span></div>
-    <p class="hint">The 14 callers above plus ${num(all.personas - 14)} from a seeded generator: reworded scam patterns, legitimate callers who sound urgent or unusual, and Spanish-language callers. Cases that probe a documented limitation are marked as known gaps: they count in these totals but don't fail the build.<span class="tech-only"> <code>evals/personas_generated.yaml</code> from <code>scripts/generate_personas.py</code>; <code>python -m evals.simulate</code>.</span></p>
-    <section class="tiles" aria-label="All simulated callers">
+  return `<section class="tiles" aria-label="${esc(ids.label)}">
       ${tile("Task success", `${num(m.task_success.achieved)}<small> / ${num(m.task_success.of)}</small>`, "benign + impatient", "measured", true)}
       ${tile("Correct refusals", `${num(m.correct_refusals.blocked)}<small> / ${num(m.correct_refusals.of)}</small>`, "adversarial", "measured", true)}
       ${tile("False-positive rate", `${Math.round(m.false_positive_rate * 100)}%`, "benign callers handed off", "measured")}
     </section>
-    <div class="table-wrap"><table id="sa-table"><thead><tr><th>Set</th><th>Language</th><th>Callers</th><th class="num">Total</th><th class="num">Served</th><th class="num">Stopped</th><th class="num">Known-gap misses</th></tr></thead><tbody>
-    ${all.breakdown.map((b) => `<tr><td>${esc(SET[b.set] || b.set)}</td><td>${esc(LANG[b.language] || b.language)}</td><td>${b.side === "benign" ? "Members" : "Adversaries"}</td><td class="num" translate="no">${num(b.personas)}</td><td class="num" translate="no">${num(b.served)}</td><td class="num" translate="no">${num(b.stopped)}</td><td class="num" translate="no">${num(b.known_gap_misses)}</td></tr>`).join("")}
+    <div class="table-wrap"><table id="${ids.table}"><thead><tr><th>Set</th><th>Language</th><th>Callers</th><th class="num">Total</th><th class="num">Served</th><th class="num">Stopped</th><th class="num">Known-gap misses</th></tr></thead><tbody>
+    ${all.breakdown.map((b) => `<tr><td>${esc(SIM_SET[b.set] || b.set)}</td><td>${esc(SIM_LANG[b.language] || b.language)}</td><td>${b.side === "benign" ? "Members" : "Adversaries"}</td><td class="num" translate="no">${num(b.personas)}</td><td class="num" translate="no">${num(b.served)}</td><td class="num" translate="no">${num(b.stopped)}</td><td class="num" translate="no">${num(b.known_gap_misses)}</td></tr>`).join("")}
     </tbody></table></div>
     <h3 style="margin:14px 0 6px">Known gaps</h3>
-    <div class="table-wrap"><table id="sa-gaps"><thead><tr><th>Callers</th><th class="num">Missed</th><th class="num">Met</th><th>Why</th></tr></thead><tbody>
-    ${all.known_gaps.map((g) => `<tr><td class="wrap"><span class="mono tiny">${esc(g.category)}</span> <span class="tag">${esc(LANG[g.language] || g.language)}</span></td><td class="num" translate="no">${num(g.missed)}</td><td class="num" translate="no">${num(g.met)}</td><td class="wrap tiny">${esc(g.reason)}</td></tr>`).join("")}
-    </tbody></table></div></section>`;
+    <div class="table-wrap"><table id="${ids.gaps}"><thead><tr><th>Callers</th><th class="num">Missed</th><th class="num">Met</th><th>Why</th></tr></thead><tbody>
+    ${all.known_gaps.map((g) => `<tr><td class="wrap"><span class="mono tiny">${esc(g.category)}</span> <span class="tag">${esc(SIM_LANG[g.language] || g.language)}</span></td><td class="num" translate="no">${num(g.missed)}</td><td class="num" translate="no">${num(g.met)}</td><td class="wrap tiny">${esc(g.reason)}</td></tr>`).join("")}
+    </tbody></table></div>`;
+}
+
+// The development set (hand-written + seeded generator): the callers the safeguard changes were designed on.
+function allCallersHtml(all) {
+  if (!all || !all.breakdown) return "";
+  return `<section class="card" aria-labelledby="sa-h"><div class="card-head"><h2 id="sa-h">Development set · ${num(all.personas)} simulated callers</h2><span class="hint" translate="no">${num(all.regressions.length)} regressions · ${num(all.known_gap_misses)} known-gap misses</span></div>
+    <p class="hint">The 14 callers above plus ${num(all.personas - 14)} from a seeded generator: reworded scam patterns, legitimate callers who sound urgent or unusual, and Spanish-language callers. Changes to the safeguards were designed on these callers. Cases that probe a documented limitation are marked as known gaps: they count in these totals but don't fail the build.<span class="tech-only"> <code>evals/personas_generated.yaml</code> from <code>scripts/generate_personas.py</code>; <code>python -m evals.simulate</code>.</span></p>
+    ${simSetBody(all, {label: "Development set", table: "sa-table", gaps: "sa-gaps"})}</section>`;
+}
+
+// The held-out set: written separately and kept out of the design, so it shows how a change carries over.
+function heldOutHtml(held, dev, before) {
+  if (!held || !held.breakdown) return "";
+  const row = (name, b, now) => {
+    const benign = now.metrics.task_success, adv = now.metrics.correct_refusals;
+    const cell = (x, y) => `<td class="num" translate="no">${num(x)} → ${num(y)}</td>`;
+    return `<tr><td>${esc(name)}</td><td class="num" translate="no">${num(now.personas)}</td>${cell(b.benign_served, benign.achieved)}${cell(b.benign - b.benign_served, benign.of - benign.achieved)}${cell(b.adversarial_stopped, adv.blocked)}<td class="num" translate="no">${num(adv.of)}</td></tr>`;
+  };
+  const table = before && dev ? `<h3 style="margin:14px 0 6px">Before and after the change</h3>
+    <p class="hint">Measured on both sets before and after the change to risk scoring (Spanish, phrase families, urgency counted once per call), scrubbing of numbers read out as words, and the lost-phone check on step-up. The held-out set lags the development set: that gap is the honest estimate of how much the change was fitted to the callers it was designed on.<span class="tech-only"> Before: commit ${esc(before.commit)}, policy sha256 ${esc(before.policy_ref)}.</span></p>
+    <div class="table-wrap"><table id="ba-table"><thead><tr><th>Set</th><th class="num">Callers</th><th class="num">Members served</th><th class="num">Members handed off</th><th class="num">Adversaries stopped</th><th class="num">Adversaries</th></tr></thead><tbody>
+    ${row("Development", before.development, dev)}${row("Held-out", before.holdout, held)}
+    </tbody></table></div>` : "";
+  return `<section class="card" aria-labelledby="sh-h"><div class="card-head"><h2 id="sh-h">Held-out set · ${num(held.personas)} simulated callers</h2><span class="hint" translate="no">${num(held.regressions.length)} regressions · ${num(held.known_gap_misses)} known-gap misses</span></div>
+    <p class="hint">A second set from another seed, with phrasings written separately and kept out of the design of safeguard changes. It covers the same caller patterns plus card numbers read with "oh" and "double", a phone the member reported lost, and members whose job or a surprise gift sounds like a risk phrase.<span class="tech-only"> <code>evals/personas_holdout.yaml</code> from <code>scripts/generate_personas_holdout.py</code>; <code>python -m evals.simulate --set holdout</code>.</span></p>
+    ${simSetBody(held, {label: "Held-out set", table: "sh-table", gaps: "sh-gaps"})}
+    ${table}</section>`;
 }
 
 // ---------- Settings ----------

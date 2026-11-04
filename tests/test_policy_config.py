@@ -51,9 +51,15 @@ def test_shipped_caps_thresholds_and_tiers_match_the_code_defaults(shipped):
 
 def test_shipped_signals_match_the_code_signals(shipped):
     def shape(signals):
-        return [(s.name, s.weight, [(p.pattern, p.flags) for p in s.patterns]) for s in signals]
+        return [
+            (s.name, s.weight, s.per_call, s.combined_weight, [(p.pattern, p.flags) for p in s.patterns])
+            for s in signals
+        ]
 
     assert shape(shipped.policy.signals) == shape(pg.SIGNALS)
+    assert [(p.pattern, p.flags) for p in shipped.policy.reported_speech] == [
+        (p.pattern, p.flags) for p in pg.REPORTED_SPEECH
+    ]
 
 
 def test_shipped_velocity_and_step_up_match_the_code_defaults(shipped):
@@ -104,9 +110,12 @@ INVALID = [
     (_broken("max_usd_per_call: 5000", "max_usd_per_call: .nan"), "caps.max_usd_per_call"),
     (_broken("  threshold: 4", "  threshold: 0"), "risk.threshold"),
     (
-        _broken("      weight: 1\n      patterns:\n", "      weight: 1\n      patterns:\n        - '(unclosed'\n"),
+        _broken("      weight: 2\n      patterns:\n", "      weight: 2\n      patterns:\n        - '(unclosed'\n"),
         "doesn't compile",
     ),
+    (_broken("  reported_speech:\n", "  reported_speech:\n    - '(unclosed'\n"), "risk.reported_speech"),
+    (_broken("      combined_weight: 2", "      combined_weight: -1"), "combined_weight"),
+    (_broken("      per_call: true", "      per_call: sometimes"), "per_call"),
     (_broken("channels: [sms, call]", "channels: [sms, email]"), "step_up.channels"),
     (_broken("\n  min_tier: high", "\n  min_tier: sometimes"), "step_up.min_tier"),
     (_broken("{tool: book_meeting,", "{tool: book_a_meeting,"), "undeclared tool 'book_a_meeting'"),

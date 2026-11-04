@@ -18,7 +18,8 @@ Pieces, each behind a small interface so a deployment can swap it:
                       (SimulatedVerifier for tests/evals/demo; TwilioVerifyVerifier
                       for Twilio Verify; UnavailableVerifier when nothing is set up)
   RiskSignalProvider  signals(record, destination) -> e.g. {"recent_sim_swap"}
-                      (the SIM-swap / number-port hook; NoRiskSignals by default)
+                      (the SIM-swap / number-port hook, and the member record's own flags such as a
+                      lost or stolen phone report; NoRiskSignals by default)
 
 StepUpSession holds one call's state: codes sent, failed attempts, lockout, and
 whether the caller is verified. On success it marks the call's CallPolicy
@@ -56,8 +57,12 @@ from typing import Any, Protocol
 
 CHANNELS: tuple[str, ...] = ("sms", "call")
 CODE_LENGTH = 6
-# Risk indicators that stop a code from being sent over the PSTN (handoff instead).
-BLOCKING_SIGNALS: frozenset[str] = frozenset({"recent_sim_swap", "recent_number_port", "recent_contact_change"})
+# Risk indicators that stop a code from being sent over the PSTN (handoff instead). The first two come from the
+# carrier or a vendor; the last two from the member's own record: contact details changed recently, or the
+# member has reported the phone on file lost or stolen (whoever holds it would pass a code check).
+BLOCKING_SIGNALS: frozenset[str] = frozenset(
+    {"recent_sim_swap", "recent_number_port", "recent_contact_change", "device_reported_lost"}
+)
 
 
 # ---------- Customer lookup ----------

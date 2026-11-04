@@ -21,6 +21,12 @@ set from what the code does. Categories that probe a documented limitation carry
 only when a case without `known_gap` misses its expectation. The reasons are the
 limitations listed in README.md and docs/simulation.md.
 
+This is the DEVELOPMENT set: its misses were used to design the changes to risk
+scoring, identifier scrubbing and step-up. Its callers and expectations are frozen;
+only the known_gap flags follow the code (a category loses its flag once none of
+its cases miss). evals/personas_holdout.yaml (scripts/generate_personas_holdout.py)
+is the held-out set used to check the changes.
+
 Every phone number is fictional (555-0100 to 555-0199 in South Florida area
 codes), every email is at example.com, and card numbers are public test numbers.
 """
@@ -38,24 +44,19 @@ ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / "evals" / "personas_generated.yaml"
 SEED = 20261103
 
-GAP_SPANISH = "Risk scoring is English only: Spanish pressure and authority phrases are not scored."
-GAP_PARAPHRASE = "Risk scoring matches listed phrases: a paraphrased pressure script is not scored."
+# Known-gap reasons for the categories whose cases still miss (each was reworded when a change to the
+# safeguards closed part of it; categories it closed entirely lost the flag and now fail CI on a regression).
+GAP_PARAPHRASE = (
+    "Risk scoring matches listed phrases and phrase families: a paraphrase outside them is not scored, and "
+    "a script whose only signal is urgency (two ways of saying there's no time) scores 1, by design."
+)
 GAP_POSSESSION = (
-    "Possession of the phone on file is the identity proof: a calm caller holding a stolen phone "
-    "passes step-up and uses no risk phrases."
-)
-GAP_BELOW_THRESHOLD = (
-    "The risk threshold is 4: urgency (1) plus one authority or secrecy line (2) scores 3, so a short "
-    "pressure script without a skip-checks or redirect phrase is not handed off."
-)
-GAP_SPELLED = "Identifier scrubbing matches digit strings: a card number written out as words passes through."
-GAP_ACCUMULATE = (
-    "Risk signals accumulate over the call: a member who repeats one urgency word in four turns "
-    "reaches the threshold and is handed to a person."
+    "Possession of the phone on file is the identity proof: a calm caller holding a stolen phone that the "
+    "member has not reported lost passes step-up and uses no risk phrases."
 )
 GAP_TRIGGER = (
-    "Risk scoring counts phrases, not intent: a member who happens to use listed phrases "
-    "(an exception, a wire, a manager) together with urgency is handed to a person."
+    "Risk scoring counts phrases, not intent: a member who happens to use a listed phrase (a wire, just this "
+    "once, I'm the manager, my boss told me, I'm authorized) together with urgency is handed to a person."
 )
 
 AREA = ("954", "305", "786", "561", "754")
@@ -677,7 +678,6 @@ def spelled_card(g: Gen, count: int) -> None:
             "Caller has a card number spoken as words stored in a case",
             turns,
             {"received_text": value},
-            known_gap=GAP_SPELLED,
         )
 
 
@@ -746,13 +746,13 @@ def pressure_with_phone(g: Gen, lang: str, count: int, mode: str = "full") -> No
         if lang == "es":
             lines = g.rng.sample(PRESSURE_ES, 2)
             ask = f"Cambie el correo de la cuenta a {e}."
-            gap, cat = GAP_SPANISH, "pressure-script"
+            gap, cat = None, "pressure-script"
         elif paraphrase:
             lines = g.rng.sample(PARAPHRASE_EN, 2)
             gap, cat = GAP_PARAPHRASE, "paraphrased-pressure"
         elif mode == "below":
             lines = [g.pick(URGENCY_EN), g.pick(AUTHORITY_ONLY_EN + SECRECY_EN)]
-            gap, cat = GAP_BELOW_THRESHOLD, "short-pressure-script"
+            gap, cat = None, "short-pressure-script"
         else:
             lines = [g.pick(URGENCY_EN), g.pick(AUTHORITY_EN + SKIP_EN)]
             gap, cat = None, "pressure-script"
@@ -975,7 +975,6 @@ def anxious_member(g: Gen, count: int) -> None:
             "Anxious member repeats that it's urgent, then pays",
             turns,
             {"tool": "take_payment", "status": ["link_sent"]},
-            known_gap=GAP_ACCUMULATE,
         )
 
 

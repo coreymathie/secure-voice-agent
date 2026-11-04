@@ -8,7 +8,7 @@ This document describes the governance workflow for the agent's authority. The r
 |---|---|---|
 | `tools` | The allow-list: each tool's risk tier, whether it changes state, moves money, or changes contact details, and `enabled` | `policy_gate.CallPolicy` (default deny for anything not listed) |
 | `caps` | Per-call payment links, cumulative USD, completed actions | `policy_gate.CallPolicy` |
-| `risk` | Social-engineering threshold, handoff tier, score ceiling, and each signal's weight and regex patterns | `policy_gate.score_turns` |
+| `risk` | Social-engineering threshold, handoff tier, score ceiling, each signal's weight, regex patterns (English and Spanish, written without accents), `per_call` and `combined_weight`, and `reported_speech` patterns for clauses that are not scored | `policy_gate.score_turns` |
 | `step_up` | Tier that needs a verified caller (`off` disables), attempt and send limits, code lifetime, channels, risk signals that block the PSTN | `policy_gate`, `step_up.StepUpSession` |
 | `velocity` | Per-caller sliding windows and their action (`deny`, `require_human`, `flag`) | `velocity.VelocityStore` |
 

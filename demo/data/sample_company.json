@@ -2360,7 +2360,7 @@
    "date": "2026-10-07",
    "kind": "fraud",
    "title": "Social-engineering attempt stopped",
-   "detail": "A caller claiming to own a business account pressed for a payment link to a new number. Risk score 6 handed the payment to a person; no link was sent.",
+   "detail": "A caller claiming to own a business account pressed for a payment link to a new number. Risk score 7 handed the payment to a person; no link was sent.",
    "call": "CA562fe0b6280646deceb2802f6153cbec"
   },
   {

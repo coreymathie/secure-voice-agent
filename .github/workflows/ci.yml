@@ -62,3 +62,24 @@ jobs:
         with:
           name: console-screenshots
           path: console-screenshots
+
+  docker:
+    # Builds each Dockerfile (no push) and runs one command inside the image, so a base-image update
+    # (Dependabot bumps the FROM line) is built and smoke-tested before it merges.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            tag: secure-voice-agent:ci
+            smoke: python -c "import src.agent.server" && python -m src.safeguards.policy_config config/policy.yaml
+          - dockerfile: Dockerfile.console
+            tag: secure-voice-agent-console:ci
+            smoke: python -c "import src.console_server" && python -m src.safeguards.policy_config config/policy.yaml
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build ${{ matrix.dockerfile }}
+        run: docker build --file "${{ matrix.dockerfile }}" --tag "${{ matrix.tag }}" .
+      - name: Smoke command inside the image
+        run: docker run --rm "${{ matrix.tag }}" sh -c '${{ matrix.smoke }}'

@@ -7,7 +7,10 @@ Everything in the file comes from running the repo's own checks:
 
   call_evals          python -m evals.run's harness (31 scenarios, real Lambda handler code)
   simulated_callers   python -m evals.simulate's harness (the 14 hand-written personas, transcripts included)
-  simulated_callers_all  the same harness over every persona file (hand-written + generated): counts only
+  simulated_callers_all  the same harness over the development set (hand-written + generated): counts only
+  simulated_callers_holdout  the same harness over the held-out set (evals/personas_holdout.yaml): counts only
+  simulated_callers_before_change  both sets' headline counts as measured before the changes to risk scoring,
+                      spoken-number scrubbing and step-up (a record of those runs, not re-run)
   mutation_tests      the mutation tests in tests/test_evals.py and tests/test_simulate.py
   pytest              the whole suite's pass/fail/skip counts
 
@@ -35,7 +38,42 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 OUT = ROOT / "demo" / "data" / "evals.json"
 MUTATION = re.compile(r"^test_(evals_catch|simulator_catches|simulator_measures)_(.+)$")
-DETERMINISTIC = ("policy", "call_evals", "simulated_callers", "simulated_callers_all")
+DETERMINISTIC = (
+    "policy",
+    "call_evals",
+    "simulated_callers",
+    "simulated_callers_all",
+    "simulated_callers_holdout",
+    "simulated_callers_before_change",
+)
+
+# The two sets as measured before the changes to risk scoring (Spanish, phrase families, urgency counted once),
+# spoken-number scrubbing and the lost-phone signal: python -m evals.simulate [--set holdout] at commit a6dd7b0,
+# where the safeguards were those of 2b84edb. Kept as a record so the console can show before and after.
+BEFORE_CHANGE = {
+    "commit": "a6dd7b0",
+    "policy_ref": "15fb0b144bea",
+    "development": {
+        "personas": 397,
+        "benign_served": 139,
+        "benign": 155,
+        "adversarial_stopped": 200,
+        "adversarial": 242,
+        "spanish_adversarial_stopped": 38,
+        "spanish_adversarial": 48,
+        "as_expected": 339,
+    },
+    "holdout": {
+        "personas": 276,
+        "benign_served": 116,
+        "benign": 116,
+        "adversarial_stopped": 92,
+        "adversarial": 160,
+        "spanish_adversarial_stopped": 22,
+        "spanish_adversarial": 42,
+        "as_expected": 201,
+    },
+}
 
 
 def _version() -> str:
@@ -51,6 +89,7 @@ def run_evals() -> dict:
     scenarios = json.loads(harness.results_json(harness.run_all(policy=policy)))
     personas = json.loads(simulate.results_json(simulate.run_all(policy=policy)))
     everyone = simulate.run_all(simulate.load_set("development"), policy=policy)
+    held_out = simulate.run_all(simulate.load_set("holdout"), policy=policy)
     return {
         "policy": {
             "source": "config/policy.yaml",
@@ -64,6 +103,12 @@ def run_evals() -> dict:
             "metrics": simulate.metrics(everyone),
             **simulate.summary(everyone),
         },
+        "simulated_callers_holdout": {
+            "command": "python -m evals.simulate --set holdout",
+            "metrics": simulate.metrics(held_out),
+            **simulate.summary(held_out),
+        },
+        "simulated_callers_before_change": BEFORE_CHANGE,
     }
 
 

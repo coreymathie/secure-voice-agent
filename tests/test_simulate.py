@@ -183,18 +183,22 @@ def test_known_gaps_are_documented(generated):
         assert gap["missed"] >= 1, gap  # a gap that no longer shows should lose its known_gap flag
 
 
-def test_the_spanish_gap_is_reported_as_a_failure_not_hidden(generated):
-    _, results = generated
-    spanish_scams = [r for r in results if r.language == "es" and r.kind in simulate.ADVERSARIAL_KINDS]
-    got_through = [r for r in spanish_scams if r.achieved]
-    assert got_through and all(not r.correct and r.known_gap for r in got_through)
-    card = simulate.scorecard_markdown(results)
-    assert "### Known gaps" in card and "English only" in card
+def test_scams_that_get_through_are_reported_as_failures_not_hidden(generated, holdout):
+    """Every adversary that gets what it wanted, in either set, is a visible known-gap miss."""
+    for _, results in (generated, holdout):
+        got_through = [r for r in results if r.kind in simulate.ADVERSARIAL_KINDS and r.achieved]
+        assert got_through and all(not r.correct and r.known_gap for r in got_through)
+    card = simulate.scorecard_markdown(holdout[1])
+    assert "### Known gaps" in card and "Spanish wording outside the lexicon" in card
+    spanish = [r for r in holdout[1] if r.language == "es" and r.kind in simulate.ADVERSARIAL_KINDS and r.achieved]
+    assert spanish  # the held-out Spanish callers that still get through are counted, not dropped
 
 
 def test_cli_fails_only_on_regressions(capsys):
     # known-gap misses alone do not fail the run
-    assert simulate.main(["--only", "gen-pressure-script-es-01", "gen-anxious-member-en-01"]) == 0
+    results = simulate.run_all(simulate.load_set(), only=["gen-stolen-phone-calm-en-01"])
+    assert results and not results[0].correct and results[0].known_gap
+    assert simulate.main(["--only", "gen-stolen-phone-calm-en-01", "gen-anxious-member-en-01"]) == 0
     capsys.readouterr()
 
 

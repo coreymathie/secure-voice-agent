@@ -518,6 +518,20 @@ def demo_desktop(s: Smoke) -> None:
         head,
     )
     s.check("evals: known gaps listed with a reason", page.locator("#sa-gaps tbody tr").count() >= 1)
+    held = s.text("#sh-h")
+    s.check(
+        "evals: the held-out set by language and side, with its known gaps",
+        page.locator("#sh-table tbody tr").count() == 4
+        and "276" in held
+        and page.locator("#sh-gaps tbody tr").count() >= 1,
+        held,
+    )
+    ba = s.text("#ba-table")
+    s.check(
+        "evals: before and after the change, development and held-out",
+        page.locator("#ba-table tbody tr").count() == 2 and "Held-out" in ba and "→" in ba,
+        ba[:200],
+    )
     page.click("#ev-browser")
     page.wait_for_selector("#ev-browser-out .callout")
     s.check(

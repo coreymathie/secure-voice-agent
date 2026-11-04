@@ -99,6 +99,58 @@ def _luhn_valid(digits: str) -> bool:
     return checksum % 10 == 0
 
 
+# ---------- Numbers read out as words ----------
+#
+# Speech-to-text often writes a card number the way it was said: "four one one one, one one one one, ...",
+# "five one oh five", "double four", "cuatro uno uno uno". Runs of digit words (English and Spanish; "oh" for
+# zero; "double" / "triple" / "doble" repeat the next digit; digit groups may be mixed in) are read as one
+# number. A run that is a Luhn-valid 13-19 digit card number is redacted as `pan`, and a run of exactly 9
+# digits as `ssn`, the same as the digit rules above. Other runs (a phone number, an amount said digit by
+# digit) are left as they are. Not covered: numbers said in pairs or tens ("forty-one eleven"), a card
+# number run straight into the expiry date with no word between, and languages other than English and Spanish.
+
+_DIGIT_WORDS = {
+    "zero": "0", "oh": "0", "one": "1", "two": "2", "three": "3", "four": "4", "five": "5", "six": "6",
+    "seven": "7", "eight": "8", "nine": "9",
+    "cero": "0", "uno": "1", "una": "1", "dos": "2", "tres": "3", "cuatro": "4", "cinco": "5", "seis": "6",
+    "siete": "7", "ocho": "8", "nueve": "9",
+}  # fmt: skip
+_REPEAT = {"double": 2, "triple": 3, "doble": 2}
+_UNIT = r"(?:(?:double|triple|doble)\s+)?(?:" + "|".join(_DIGIT_WORDS) + r"|\d{1,4})"
+_RUN = re.compile(rf"\b{_UNIT}(?:[\s,.\-]+{_UNIT})+\b", re.IGNORECASE)
+_TOKEN = re.compile(rf"\b({_UNIT})\b", re.IGNORECASE)
+
+
+def _token_digits(token: str) -> str:
+    parts = token.lower().split()
+    times = _REPEAT.get(parts[0], 1) if len(parts) == 2 else 1
+    word = parts[-1]
+    return (word if word.isdigit() else _DIGIT_WORDS[word]) * times
+
+
+def _spoken_numbers(text: str, allow: tuple[str, ...], counts: dict[str, int]) -> str:
+    out: list[str] = []
+    last = 0
+    for run in _RUN.finditer(text):
+        tokens = list(_TOKEN.finditer(run.group(0)))
+        if all(t.group(1).isdigit() for t in tokens):
+            continue  # digits only: the digit rules handle it
+        number = "".join(_token_digits(t.group(1)) for t in tokens)
+        if "pan" not in allow and 13 <= len(number) <= 19 and _luhn_valid(number):
+            rule = "pan"
+        elif "ssn" not in allow and len(number) == 9:
+            rule = "ssn"
+        else:
+            continue
+        start, end = run.start() + tokens[0].start(), run.start() + tokens[-1].end()
+        out.append(text[last:start])
+        out.append("[REDACTED_PAN]" if rule == "pan" else "[REDACTED_SSN]")
+        counts[rule] = counts.get(rule, 0) + 1
+        last = end
+    out.append(text[last:])
+    return "".join(out)
+
+
 def redact(text: str, allow: tuple[str, ...] = ()) -> tuple[str, dict[str, int]]:
     """
     Redact PII patterns in `text`.
@@ -108,7 +160,7 @@ def redact(text: str, allow: tuple[str, ...] = ()) -> tuple[str, dict[str, int]]
     legitimately need to log an email to a tool call, for example.
     """
     counts: dict[str, int] = {}
-    out = text
+    out = _spoken_numbers(text, allow, counts)
     for rule in _RULES:
         if rule.name in allow:
             continue

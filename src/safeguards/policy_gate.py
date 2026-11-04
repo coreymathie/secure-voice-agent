@@ -54,6 +54,7 @@ from __future__ import annotations
 import math
 import os
 import re
+import unicodedata
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass, field, replace
 from typing import Any
@@ -104,6 +105,20 @@ CONTACT_CHANGED = frozenset({"updated"})
 COMPLETED = frozenset({"booked", "created", "logged"}) | PAYMENT_ISSUED | CONTACT_CHANGED
 
 # ---------- Social-engineering signals ----------
+#
+# Five signal classes, each a list of patterns in English and Spanish. Text is lower-cased and accents are
+# folded before matching (_normalize: "sáltese" -> "saltese", "dueño" -> "dueno"), so patterns are written
+# without accents, and no language detection is needed: every pattern runs on every turn.
+#
+# How the score adds up (score_turns):
+#   - each signal counts once per caller turn, however often it matches in that turn, and accumulates
+#     over the call;
+#   - urgency is pressure, not a request: it counts once per call (repeating it adds nothing), at its
+#     `weight` on its own and at its `combined_weight` once any other signal has fired on the call. So an
+#     anxious member who says "urgent" in every turn scores 1, and urgency plus one authority claim or
+#     one secrecy line scores 2 + 2 = 4, the default threshold;
+#   - a clause that reports what someone else said ("a man said he was from the fraud team", "the
+#     scammers told me to buy gift cards") is not scored: members describe scams in the scammer's words.
 
 
 @dataclass(frozen=True)
@@ -111,45 +126,123 @@ class RiskSignal:
     name: str
     weight: int
     patterns: tuple[re.Pattern, ...]
+    per_call: bool = False  # count once per call instead of once per turn
+    combined_weight: int | None = None  # weight once another signal has fired on the call (None: `weight`)
 
 
 def _p(*patterns: str) -> tuple[re.Pattern, ...]:
     return tuple(re.compile(p, re.IGNORECASE) for p in patterns)
 
 
+# Shared vocabulary (kept in sync with config/policy.yaml, which spells each pattern out in full).
+_ROLES_EN = (
+    r"owner|ceo|cfo|coo|president|vice president|manager|supervisor|director|administrator|admin|officer|"
+    r"detective|auditor|investigator|examiner|treasurer|controller|executive|sergeant|lieutenant|deputy"
+)
+_CHECKS_EN = (
+    r"verification|verify|verifying|security|checks?|confirmation|codes?|passcode|pin|questions?|id|"
+    r"identification|authentication|rules?|limits?|polic(y|ies)|process|protocol|procedures?|steps?|paperwork"
+)
+_CHECKS_ES = (
+    r"verificacion|verificar\w*|seguridad|preguntas|codigos?|clave|pin|controles|control|reglas|proceso|"
+    r"procedimiento|pasos|confirmacion|confirmar\w*|identificacion|validacion|validar\w*|politicas?|limites?|tramites?"
+)
+
 SIGNALS: tuple[RiskSignal, ...] = (
     RiskSignal(
         "urgency",
         1,
         _p(
-            r"\b(urgent(ly)?|emergency|asap|immediately|hurry|no time|right (now|away)|as fast as (you|possible))\b",
+            # English: the words, their stems, and the common figures of speech for "no time"
+            r"\b(urgen(t|c)\w*|emergenc\w*|asap|immediate\w*|hurr(y|ied|ying)|rush(ed|ing)?|no time|"
+            r"right (now|away|this (minute|second))|as (fast|quickly|soon) as (you can|possible)|"
+            r"time[- ]sensitive|top priority)\b",
             r"\bbefore (it'?s|it is) too late\b",
+            r"\b(not|no) (a|another) (second|minute|moment) to (lose|waste|spare)\b",
+            r"\b(the )?clock is ticking\b",
+            r"\btime is running out\b",
+            r"\b(can'?t|cannot|can not) wait\b",
+            r"\b(move|act|work|be) (fast|quick(ly)?)\b",
+            r"\bdon'?t have (all day|any time|much time)\b",
+            # Spanish
+            r"\b(emergencia\w*|inmediat\w*|de inmediato|enseguida|en seguida|cuanto antes|"
+            r"lo (antes|mas pronto) posible|ahora mismo|ya mismo|de prisa|deprisa|rapid\w*|apur\w*|"
+            r"(dese|date|tengo|con|ando con) prisa|sin demora|no (hay|tengo|tenemos) tiempo)\b",
+            r"\bantes de que sea (demasiado )?tarde\b",
+            r"\bno (puedo|puede|podemos) esperar\b",
         ),
+        per_call=True,
+        combined_weight=2,
     ),
     RiskSignal(
         "authority",
         2,
         _p(
-            r"\b(i'?m|i am|this is) (the |a |an |your )?(owner|ceo|cfo|president|manager|supervisor|director|"
-            r"administrator|admin|officer|detective|auditor|investigator)\b",
+            # a role claim; "the owner of this account" is an account holder, not a role
+            rf"\b(i'?m|i am|this is|it'?s) (?!(the |an? )?account (owner|holder)\b)(the |a |an |your |their )?"
+            rf"((branch|account|bank|regional|general|"
+            rf"office) )?({_ROLES_EN})\b(?! of (this|the|my|our) (own )?account\b)",
             r"\b(from|with|calling from) (the )?(irs|fbi|police|sheriff'?s office|bank|fraud (department|team)|"
             r"security (department|team)|it department|head office|corporate)\b",
-            r"\bon behalf of (the |my )?(owner|ceo|bank|management|boss)\b",
-            r"\b(i'?m|i am) authori[sz]ed\b",
-            r"\bmy boss (said|told|wants|needs)\b",
+            r"\b(i'?m|i am|this is|we'?re|we are|i work|i'?m calling|calling) (\w+ ){0,2}(from|with|at|for|in) "
+            r"(the |your )?(fraud (unit|division)|security (unit|division)|compliance|legal (department|team)|"
+            r"risk (department|team)|internal audit|headquarters|treasury)\b",
+            r"\bon behalf of (the |my |our )?(owner|ceo|bank|credit union|management|boss|company|business)\b",
+            r"\b(i'?m|i am|we'?re|we are) (fully |also )?authori[sz]ed\b",
+            r"\bmy (boss|manager|supervisor|employer|director) (said|says|told|tells|wants|needs|asked|approved)\b",
+            r"\b(your|the) (supervisor|manager|boss|branch manager|director) (already )?(cleared|approved|"
+            r"authori[sz]ed|okayed|signed off)\b",
+            r"\b(cleared|approved|authori[sz]ed|okayed|signed off) by (your|the|a) (supervisor|manager|director|"
+            r"boss|head office|bank)\b",
+            r"\b(i|we) (run|own|manage|head) (the|this|a|our|my) (company|business|firm|organi[sz]ation|corporation)\b",
+            # Spanish
+            r"\b(soy|habla|le habla|aqui habla) (el |la |un |una |su )?(dueno|duena|propietari[oa]|gerente|"
+            r"director[a]?|jef[ea]|supervisor[a]?|administrador[a]?|oficial|agente|detective|auditor[a]?|"
+            r"investigador[a]?|president[ea]|tesorer[oa]|ejecutiv[oa]|inspector[a]?)\b"
+            r"(?! de (esta|la|mi) (propia )?cuenta\b)",
+            r"\b(llamo|hablo|le llamo|le hablo|lo llamo|la llamo|estoy llamando|trabajo|vengo) (\w+ ){0,2}"
+            r"(de|del|desde|en|para) (el |la |los |las )?(banco|cooperativa|policia|irs|fbi|gobierno|"
+            r"departamento de (fraudes?|seguridad)|oficina (central|principal)|sede central|corporativo|"
+            r"area de (fraudes?|seguridad|cumplimiento)|cumplimiento|hacienda)\b",
+            r"\b(de parte|en nombre) (de|del) (el |la |mi |su )?(dueno|duena|propietari[oa]|jef[ea]|banco|"
+            r"gerencia|empresa|negocio|compania|director[a]?)\b",
+            r"\bestoy autorizad[oa]\b",
+            r"\bmi (jef[ea]|gerente|supervisor[a]?|patron[a]?) (me )?(dijo|pidio|quiere|necesita|ordeno|autorizo)\b",
+            r"\b(su|el|la) (supervisor[a]?|gerente|jef[ea]|director[a]?) (ya )?(lo |me )?(aprobo|autorizo)\b",
+            r"\b(manejo|dirijo|administro) (la|una|esta|mi) (empresa|compania|negocio)\b",
         ),
     ),
     RiskSignal(
         "skip_checks",
         3,
         _p(
-            r"\b(skip|bypass|override|disable|turn off|get around) (the |your |all |any |those )?"
-            r"(verification|security|checks?|confirmation|rules?|limits?|polic(y|ies)|process|protocol|steps?)\b",
-            r"\b(don'?t|do not|no need to|you don'?t need to|you do not need to) (verify|confirm|check|validate)\b",
+            # a skipping verb aimed at a check, or "the check isn't needed"
+            r"\b(skip|bypass|override|disable|turn off|get around|go around|waive|forget about|ignore|dispense with|"
+            r"do away with|(not|don'?t) bother with|no need for|without) (the |your |all |any |those |these |that |"
+            r"this |all the |my )?(usual |normal |standard |whole |extra )?(" + _CHECKS_EN + r")\b",
+            r"\b(don'?t|do not|no need to|you don'?t (need|have) to|you do not (need|have) to|there'?s no need to|"
+            r"needn'?t) (verify|confirm|check|validate|authenticate)\b",
+            r"\b("
+            + _CHECKS_EN
+            + r") (isn'?t|aren'?t|is not|are not|not) (really |even )?(needed|necessary|required)\b",
             r"\bignore (your|the|all|any|previous|prior) (instructions|rules|polic(y|ies)|limits|guidelines|"
             r"system prompt)\b",
-            r"\b(make|do) an exception\b",
-            r"\bjust this once\b",
+            # "make an exception", but not on a fee: waiving a late fee is an ordinary request
+            r"\b(make|do) (an|one) exception\b(?! (on|for|with|about) (the |my |a |this |that )?(\w+ )?"
+            r"(fee|charge|penalt\w*|interest)\b)",
+            r"\bjust this (once|one time)\b",
+            r"\b(go|jump|skip) (straight|right|directly) to\b",
+            # Spanish
+            r"\b(saltese|saltar\w*|saltemos|saltate|omita|omitir|omitamos|evite|evitar|olvidese de|ignore|ignora|"
+            r"ignorar|pase por alto|sin) (el |la |los |las |todo |toda |todos |todas |ese |esa |esos |esas |este |"
+            r"esta |su |sus )?(\w+ )?(" + _CHECKS_ES + r")\b",
+            r"\bno (hace falta|es necesario|necesita|tiene que|hay que|hay necesidad de|se necesita)( que)? "
+            r"(me |lo |la )?(verificar\w*|confirmar\w*|comprobar\w*|validar\w*|revisar\w*|(la )?verificacion|"
+            r"(el )?codigo|(las )?preguntas)\b",
+            r"\b(haga|hagan|hacer|haz|hagame|hagamos) una excepcion\b(?! (con|en|para|por) (el |la |mi |su |este |"
+            r"esta )?(\w+ )?(cargo|multa|recargo|comision|interes\w*|cuota)\b)",
+            r"\b(solo|nada mas|unicamente) (por )?esta (vez|ocasion)\b",
+            r"\b(ignora|ignore|olvida|olvide) (tus|sus|las|todas las) (instrucciones|reglas)\b",
         ),
     ),
     RiskSignal(
@@ -165,52 +258,112 @@ SIGNALS: tuple[RiskSignal, ...] = (
             r"\b(change|update|switch) (my |the )?(phone number|number on file|email on file|bank account|"
             r"account number|routing number|payout account|deposit account)\b",
             r"\b(gift cards?|wire (it|the money|transfer)|bitcoin|crypto(currency)?|western union)\b",
+            # Spanish: to another number, or to someone else's number, phone or account
+            r"\b(mande\w*|envie\w*|pase\w*|transfiera\w*|deposite\w*|reenvie\w*|manda|envia)( el| la| los| las)?"
+            r"( enlace| link| dinero| pago| codigo| reembolso| fondos)?( de pago)? (a|al) (otro|otra|"
+            r"(el )?(numero|telefono|celular|correo|cuenta) de (mi|su|un|una))\b",
+            r"\b(cambi\w*|actualic\w*|actualiz\w*) (el |mi |la )?(numero de telefono|numero registrado|"
+            r"telefono registrado|correo registrado|cuenta bancaria|numero de cuenta|numero de ruta)\b",
+            r"\b(tarjetas? de regalo|bitcoin|cripto\w*|western union|giro (postal|telegrafico))\b",
         ),
     ),
     RiskSignal(
         "secrecy",
         2,
         _p(
-            r"\b(don'?t|do not) (tell|mention|inform|notify|let) (anyone|anybody|my|the|your)\b",
-            r"\bkeep (this|it) (between us|quiet|secret|confidential)\b",
+            r"\b(don'?t|do not|never) (tell|mention|inform|notify|let|alert) (anyone|anybody|my|the|your|him|her)\b",
+            r"\bkeep (this|it|that) (between us|between you and me|quiet|secret|confidential|private|to yourself)\b",
+            r"\b(nobody|no one) (else )?(needs to|has to|should|must|can) (know|hear|find out)\b",
+            r"\b(i'?d|i would) (rather|prefer) (that )?(nobody|no one) (else )?(knows?|hears?|finds? out)\b",
+            r"\bwithout (telling|notifying|alerting|informing) (anyone|anybody|my|the|him|her)\b",
+            # Spanish
+            r"\bno (le |les |se lo )?(diga|digas|digan|cuente|cuentes|mencione|menciones|avise|avises|informe|"
+            r"notifique)( nada| esto)?( a| al)? (nadie|mi|su|el|la|los|las)\b",
+            r"\b(quede|queda) entre (nosotros|usted y yo|tu y yo)\b",
+            r"\b(mantenga|mantengalo|guarde|guardelo)( esto)? (en secreto|en privado|confidencial)\b",
+            r"\bnadie (mas )?(tiene que|debe|necesita) (saber\w*|enterarse)\b",
+            r"\bsin (avisar\w*|decir\w*|notificar\w*|informar\w*)( a| al)? (nadie|mi|su)\b",
         ),
     ),
 )
 
+# A clause matching one of these reports what someone else said or did, usually a scam being described
+# ("a woman said she was from the fraud team"); it is left out of the score.
+REPORTED_SPEECH: tuple[re.Pattern, ...] = _p(
+    r"\b(someone|somebody|a (man|woman|guy|lady|person|caller|stranger)|the (man|woman|guy|lady|person|caller)|"
+    r"(the |a )?(scammers?|fraudsters?|crooks?)|they) (\w+ ){0,3}(said|says|told|claimed|claiming|asked|"
+    r"wanted|called|texted|emailed|saying)\b",
+    r"\b(claiming|pretending|purporting) to be\b",
+    r"\bposing as\b",
+    r"\bi (got|received) a (call|text|message|email|letter)\b",
+    r"\b(alguien|un senor|una senora|un hombre|una mujer|un tipo|(el|los|un|unos) estafador(es)?) (\w+ ){0,3}"
+    r"(dijo|dijeron|decia|diciendo|pidio|pidieron|queria|llamo|llamaron|escribio)\b",
+    r"\bhaciendose pasar por\b",
+    r"\bme (llamaron|escribieron) (diciendo|para)\b",
+)
+
 MAX_RISK_SCORE = 20
+
+_CLAUSE = re.compile(r"[.;!?]+|,")
+
+
+def _fold(text: str) -> str:
+    """Lower case without accents: "Sáltese la verificación" -> "saltese la verificacion"."""
+    decomposed = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
 
 
 def _normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", text.replace("\u2019", "'").replace("\u2018", "'")).strip().lower()
+    text = _fold(text.replace("\u2019", "'").replace("\u2018", "'")).replace("\u00bf", " ").replace("\u00a1", " ")
+    return re.sub(r"\s+", " ", text).strip().lower()
 
 
 @dataclass(frozen=True)
 class RiskAssessment:
     score: int
     signals: dict[str, int]  # signal name -> number of turns it fired in
+    points: dict[str, int] = field(default_factory=dict)  # signal name -> what it added to the score
 
     @property
     def signal_names(self) -> tuple[str, ...]:
         return tuple(sorted(self.signals))
 
 
-def score_turn(text: str, signals: tuple[RiskSignal, ...] = SIGNALS) -> dict[str, int]:
-    """Signals in one caller turn. Each signal counts once per turn, however often it matches."""
+def _scored_text(text: str, reported: tuple[re.Pattern, ...]) -> str:
+    """The turn without the clauses that report someone else's words."""
     t = _normalize(text)
+    if not reported:
+        return t
+    return " | ".join(c for c in _CLAUSE.split(t) if c.strip() and not any(p.search(c) for p in reported))
+
+
+def score_turn(
+    text: str, signals: tuple[RiskSignal, ...] = SIGNALS, reported: tuple[re.Pattern, ...] = REPORTED_SPEECH
+) -> dict[str, int]:
+    """Signals in one caller turn, at their base weight. Each signal counts once per turn, however often it matches."""
+    t = _scored_text(text, reported)
     return {s.name: s.weight for s in signals if any(p.search(t) for p in s.patterns)}
 
 
 def score_turns(
-    turns: Iterable[str], signals: tuple[RiskSignal, ...] = SIGNALS, max_score: int = MAX_RISK_SCORE
+    turns: Iterable[str],
+    signals: tuple[RiskSignal, ...] = SIGNALS,
+    max_score: int = MAX_RISK_SCORE,
+    reported: tuple[re.Pattern, ...] = REPORTED_SPEECH,
 ) -> RiskAssessment:
-    """Cumulative score across a call's caller turns, capped at max_score."""
-    total = 0
+    """Cumulative score across a call's caller turns, capped at max_score (see the comment above SIGNALS)."""
+    by_name = {s.name: s for s in signals}
     fired: dict[str, int] = {}
     for turn in turns:
-        for name, weight in score_turn(turn, signals).items():
-            total += weight
+        for name in score_turn(turn, signals, reported):
             fired[name] = fired.get(name, 0) + 1
-    return RiskAssessment(min(total, max_score), fired)
+    points: dict[str, int] = {}
+    for name, turns_fired in fired.items():
+        s = by_name[name]
+        others = any(other != name for other in fired)
+        weight = s.combined_weight if (s.combined_weight is not None and others) else s.weight
+        points[name] = weight * (1 if s.per_call else turns_fired)
+    return RiskAssessment(min(sum(points.values()), max_score), fired, points)
 
 
 # ---------- Configuration ----------
@@ -229,6 +382,7 @@ class PolicyConfig:
     tool_policies: Mapping[str, ToolPolicy] = field(default_factory=lambda: dict(TOOL_POLICIES))
     signals: tuple[RiskSignal, ...] = SIGNALS
     max_risk_score: int = MAX_RISK_SCORE
+    reported_speech: tuple[re.Pattern, ...] = REPORTED_SPEECH
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None, base: PolicyConfig | None = None) -> PolicyConfig:
@@ -404,7 +558,9 @@ class CallPolicy:
         return turns
 
     def risk(self) -> RiskAssessment:
-        return score_turns(self.caller_turns(), self.config.signals, self.config.max_risk_score)
+        return score_turns(
+            self.caller_turns(), self.config.signals, self.config.max_risk_score, self.config.reported_speech
+        )
 
     # -- step-up verification --
 
