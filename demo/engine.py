@@ -393,7 +393,7 @@ class DemoEngine:
         return {"turn": text, "signals": self.signals_in(text), "policy": self.policy.snapshot()}
 
     def signals_in(self, text: str) -> dict[str, int]:
-        return score_turn(text, self.policy.config.signals)
+        return score_turn(text, self.policy.config.signals, self.policy.config.reported_speech)
 
     # ---- call start: AI disclosure and recording consent ----
 

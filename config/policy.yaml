@@ -50,9 +50,12 @@ caps:
   max_usd_per_call: 5000
   max_actions_per_call: 8
 
-# Social-engineering scoring of the caller's finalized turns. Each signal counts once per turn;
-# the score accumulates over the call. At `threshold`, tools at or above `handoff_min_tier` hand off.
-# Patterns are Python regular expressions, matched case-insensitively against lower-cased text.
+# Social-engineering scoring of the caller's finalized turns (src/safeguards/policy_gate.py explains the
+# arithmetic). Each signal counts once per turn and accumulates over the call; a per_call signal counts once
+# per call, and a combined_weight replaces its weight once any other signal has fired on the call. At
+# `threshold`, tools at or above `handoff_min_tier` hand off. Patterns are Python regular expressions, matched
+# case-insensitively against lower-cased text with accents removed (so they are written without accents),
+# in English and Spanish; every pattern runs on every turn.
 risk:
   threshold: 4
   handoff_min_tier: high
@@ -60,25 +63,54 @@ risk:
   signals:
     urgency:
       weight: 1
+      per_call: true
+      combined_weight: 2
       patterns:
-        - '\b(urgent(ly)?|emergency|asap|immediately|hurry|no time|right (now|away)|as fast as (you|possible))\b'
+        - '\b(urgen(t|c)\w*|emergenc\w*|asap|immediate\w*|hurr(y|ied|ying)|rush(ed|ing)?|no time|right (now|away|this (minute|second))|as (fast|quickly|soon) as (you can|possible)|time[- ]sensitive|top priority)\b'
         - '\bbefore (it''?s|it is) too late\b'
+        - '\b(not|no) (a|another) (second|minute|moment) to (lose|waste|spare)\b'
+        - '\b(the )?clock is ticking\b'
+        - '\btime is running out\b'
+        - '\b(can''?t|cannot|can not) wait\b'
+        - '\b(move|act|work|be) (fast|quick(ly)?)\b'
+        - '\bdon''?t have (all day|any time|much time)\b'
+        - '\b(emergencia\w*|inmediat\w*|de inmediato|enseguida|en seguida|cuanto antes|lo (antes|mas pronto) posible|ahora mismo|ya mismo|de prisa|deprisa|rapid\w*|apur\w*|(dese|date|tengo|con|ando con) prisa|sin demora|no (hay|tengo|tenemos) tiempo)\b'
+        - '\bantes de que sea (demasiado )?tarde\b'
+        - '\bno (puedo|puede|podemos) esperar\b'
     authority:
       weight: 2
       patterns:
-        - '\b(i''?m|i am|this is) (the |a |an |your )?(owner|ceo|cfo|president|manager|supervisor|director|administrator|admin|officer|detective|auditor|investigator)\b'
+        - '\b(i''?m|i am|this is|it''?s) (?!(the |an? )?account (owner|holder)\b)(the |a |an |your |their )?((branch|account|bank|regional|general|office) )?(owner|ceo|cfo|coo|president|vice president|manager|supervisor|director|administrator|admin|officer|detective|auditor|investigator|examiner|treasurer|controller|executive|sergeant|lieutenant|deputy)\b(?! of (this|the|my|our) (own )?account\b)'
         - '\b(from|with|calling from) (the )?(irs|fbi|police|sheriff''?s office|bank|fraud (department|team)|security (department|team)|it department|head office|corporate)\b'
-        - '\bon behalf of (the |my )?(owner|ceo|bank|management|boss)\b'
-        - '\b(i''?m|i am) authori[sz]ed\b'
-        - '\bmy boss (said|told|wants|needs)\b'
+        - '\b(i''?m|i am|this is|we''?re|we are|i work|i''?m calling|calling) (\w+ ){0,2}(from|with|at|for|in) (the |your )?(fraud (unit|division)|security (unit|division)|compliance|legal (department|team)|risk (department|team)|internal audit|headquarters|treasury)\b'
+        - '\bon behalf of (the |my |our )?(owner|ceo|bank|credit union|management|boss|company|business)\b'
+        - '\b(i''?m|i am|we''?re|we are) (fully |also )?authori[sz]ed\b'
+        - '\bmy (boss|manager|supervisor|employer|director) (said|says|told|tells|wants|needs|asked|approved)\b'
+        - '\b(your|the) (supervisor|manager|boss|branch manager|director) (already )?(cleared|approved|authori[sz]ed|okayed|signed off)\b'
+        - '\b(cleared|approved|authori[sz]ed|okayed|signed off) by (your|the|a) (supervisor|manager|director|boss|head office|bank)\b'
+        - '\b(i|we) (run|own|manage|head) (the|this|a|our|my) (company|business|firm|organi[sz]ation|corporation)\b'
+        - '\b(soy|habla|le habla|aqui habla) (el |la |un |una |su )?(dueno|duena|propietari[oa]|gerente|director[a]?|jef[ea]|supervisor[a]?|administrador[a]?|oficial|agente|detective|auditor[a]?|investigador[a]?|president[ea]|tesorer[oa]|ejecutiv[oa]|inspector[a]?)\b(?! de (esta|la|mi) (propia )?cuenta\b)'
+        - '\b(llamo|hablo|le llamo|le hablo|lo llamo|la llamo|estoy llamando|trabajo|vengo) (\w+ ){0,2}(de|del|desde|en|para) (el |la |los |las )?(banco|cooperativa|policia|irs|fbi|gobierno|departamento de (fraudes?|seguridad)|oficina (central|principal)|sede central|corporativo|area de (fraudes?|seguridad|cumplimiento)|cumplimiento|hacienda)\b'
+        - '\b(de parte|en nombre) (de|del) (el |la |mi |su )?(dueno|duena|propietari[oa]|jef[ea]|banco|gerencia|empresa|negocio|compania|director[a]?)\b'
+        - '\bestoy autorizad[oa]\b'
+        - '\bmi (jef[ea]|gerente|supervisor[a]?|patron[a]?) (me )?(dijo|pidio|quiere|necesita|ordeno|autorizo)\b'
+        - '\b(su|el|la) (supervisor[a]?|gerente|jef[ea]|director[a]?) (ya )?(lo |me )?(aprobo|autorizo)\b'
+        - '\b(manejo|dirijo|administro) (la|una|esta|mi) (empresa|compania|negocio)\b'
     skip_checks:
       weight: 3
       patterns:
-        - '\b(skip|bypass|override|disable|turn off|get around) (the |your |all |any |those )?(verification|security|checks?|confirmation|rules?|limits?|polic(y|ies)|process|protocol|steps?)\b'
-        - '\b(don''?t|do not|no need to|you don''?t need to|you do not need to) (verify|confirm|check|validate)\b'
+        - '\b(skip|bypass|override|disable|turn off|get around|go around|waive|forget about|ignore|dispense with|do away with|(not|don''?t) bother with|no need for|without) (the |your |all |any |those |these |that |this |all the |my )?(usual |normal |standard |whole |extra )?(verification|verify|verifying|security|checks?|confirmation|codes?|passcode|pin|questions?|id|identification|authentication|rules?|limits?|polic(y|ies)|process|protocol|procedures?|steps?|paperwork)\b'
+        - '\b(don''?t|do not|no need to|you don''?t (need|have) to|you do not (need|have) to|there''?s no need to|needn''?t) (verify|confirm|check|validate|authenticate)\b'
+        - '\b(verification|verify|verifying|security|checks?|confirmation|codes?|passcode|pin|questions?|id|identification|authentication|rules?|limits?|polic(y|ies)|process|protocol|procedures?|steps?|paperwork) (isn''?t|aren''?t|is not|are not|not) (really |even )?(needed|necessary|required)\b'
         - '\bignore (your|the|all|any|previous|prior) (instructions|rules|polic(y|ies)|limits|guidelines|system prompt)\b'
-        - '\b(make|do) an exception\b'
-        - '\bjust this once\b'
+        - '\b(make|do) (an|one) exception\b(?! (on|for|with|about) (the |my |a |this |that )?(\w+ )?(fee|charge|penalt\w*|interest)\b)'
+        - '\bjust this (once|one time)\b'
+        - '\b(go|jump|skip) (straight|right|directly) to\b'
+        - '\b(saltese|saltar\w*|saltemos|saltate|omita|omitir|omitamos|evite|evitar|olvidese de|ignore|ignora|ignorar|pase por alto|sin) (el |la |los |las |todo |toda |todos |todas |ese |esa |esos |esas |este |esta |su |sus )?(\w+ )?(verificacion|verificar\w*|seguridad|preguntas|codigos?|clave|pin|controles|control|reglas|proceso|procedimiento|pasos|confirmacion|confirmar\w*|identificacion|validacion|validar\w*|politicas?|limites?|tramites?)\b'
+        - '\bno (hace falta|es necesario|necesita|tiene que|hay que|hay necesidad de|se necesita)( que)? (me |lo |la )?(verificar\w*|confirmar\w*|comprobar\w*|validar\w*|revisar\w*|(la )?verificacion|(el )?codigo|(las )?preguntas)\b'
+        - '\b(haga|hagan|hacer|haz|hagame|hagamos) una excepcion\b(?! (con|en|para|por) (el |la |mi |su |este |esta )?(\w+ )?(cargo|multa|recargo|comision|interes\w*|cuota)\b)'
+        - '\b(solo|nada mas|unicamente) (por )?esta (vez|ocasion)\b'
+        - '\b(ignora|ignore|olvida|olvide) (tus|sus|las|todas las) (instrucciones|reglas)\b'
     redirect:
       weight: 3
       patterns:
@@ -86,11 +118,32 @@ risk:
         - '\b(send|text|email|forward) (it|the link|the payment link|that|the code) to (my|his|her|their) (friend|colleague|assistant|boss|wife|husband|partner|son|daughter)\b'
         - '\b(change|update|switch) (my |the )?(phone number|number on file|email on file|bank account|account number|routing number|payout account|deposit account)\b'
         - '\b(gift cards?|wire (it|the money|transfer)|bitcoin|crypto(currency)?|western union)\b'
+        - '\b(mande\w*|envie\w*|pase\w*|transfiera\w*|deposite\w*|reenvie\w*|manda|envia)( el| la| los| las)?( enlace| link| dinero| pago| codigo| reembolso| fondos)?( de pago)? (a|al) (otro|otra|(el )?(numero|telefono|celular|correo|cuenta) de (mi|su|un|una))\b'
+        - '\b(cambi\w*|actualic\w*|actualiz\w*) (el |mi |la )?(numero de telefono|numero registrado|telefono registrado|correo registrado|cuenta bancaria|numero de cuenta|numero de ruta)\b'
+        - '\b(tarjetas? de regalo|bitcoin|cripto\w*|western union|giro (postal|telegrafico))\b'
     secrecy:
       weight: 2
       patterns:
-        - '\b(don''?t|do not) (tell|mention|inform|notify|let) (anyone|anybody|my|the|your)\b'
-        - '\bkeep (this|it) (between us|quiet|secret|confidential)\b'
+        - '\b(don''?t|do not|never) (tell|mention|inform|notify|let|alert) (anyone|anybody|my|the|your|him|her)\b'
+        - '\bkeep (this|it|that) (between us|between you and me|quiet|secret|confidential|private|to yourself)\b'
+        - '\b(nobody|no one) (else )?(needs to|has to|should|must|can) (know|hear|find out)\b'
+        - '\b(i''?d|i would) (rather|prefer) (that )?(nobody|no one) (else )?(knows?|hears?|finds? out)\b'
+        - '\bwithout (telling|notifying|alerting|informing) (anyone|anybody|my|the|him|her)\b'
+        - '\bno (le |les |se lo )?(diga|digas|digan|cuente|cuentes|mencione|menciones|avise|avises|informe|notifique)( nada| esto)?( a| al)? (nadie|mi|su|el|la|los|las)\b'
+        - '\b(quede|queda) entre (nosotros|usted y yo|tu y yo)\b'
+        - '\b(mantenga|mantengalo|guarde|guardelo)( esto)? (en secreto|en privado|confidencial)\b'
+        - '\bnadie (mas )?(tiene que|debe|necesita) (saber\w*|enterarse)\b'
+        - '\bsin (avisar\w*|decir\w*|notificar\w*|informar\w*)( a| al)? (nadie|mi|su)\b'
+  # A clause (split at . ; ! ? and commas) matching one of these reports what someone else said, usually a
+  # scam the member is describing; it is not scored.
+  reported_speech:
+    - '\b(someone|somebody|a (man|woman|guy|lady|person|caller|stranger)|the (man|woman|guy|lady|person|caller)|(the |a )?(scammers?|fraudsters?|crooks?)|they) (\w+ ){0,3}(said|says|told|claimed|claiming|asked|wanted|called|texted|emailed|saying)\b'
+    - '\b(claiming|pretending|purporting) to be\b'
+    - '\bposing as\b'
+    - '\bi (got|received) a (call|text|message|email|letter)\b'
+    - '\b(alguien|un senor|una senora|un hombre|una mujer|un tipo|(el|los|un|unos) estafador(es)?) (\w+ ){0,3}(dijo|dijeron|decia|diciendo|pidio|pidieron|queria|llamo|llamaron|escribio)\b'
+    - '\bhaciendose pasar por\b'
+    - '\bme (llamaron|escribieron) (diciendo|para)\b'
 
 # Step-up verification (docs/auth.md). min_tier: low | medium | high | off.
 step_up:
@@ -99,7 +152,9 @@ step_up:
   max_sends_per_call: 3
   code_ttl_seconds: 600
   channels: [sms, call]
-  blocking_signals: [recent_contact_change, recent_number_port, recent_sim_swap]
+  # Signals that stop a code being sent (handoff instead): carrier data (SIM swap, port) and the member
+  # record (a recent contact change, a phone the member reported lost or stolen).
+  blocking_signals: [device_reported_lost, recent_contact_change, recent_number_port, recent_sim_swap]
 
 # Per-caller sliding windows (velocity.py). action: deny | require_human | flag.
 velocity:

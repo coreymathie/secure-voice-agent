@@ -68,19 +68,25 @@ class Caps(_Strict):
     max_actions_per_call: int = Field(ge=0)
 
 
+def _compile_all(patterns: list[str]) -> list[str]:
+    for p in patterns:
+        try:
+            re.compile(p, re.IGNORECASE)
+        except re.error as e:
+            raise ValueError(f"pattern {p!r} doesn't compile: {e}") from e
+    return patterns
+
+
 class SignalSpec(_Strict):
     weight: int = Field(ge=0, le=100)
     patterns: list[str] = Field(min_length=1)
+    per_call: bool = False  # count once per call instead of once per turn
+    combined_weight: int | None = Field(default=None, ge=0, le=100)  # weight once another signal has fired
 
     @field_validator("patterns")
     @classmethod
     def _compiles(cls, patterns: list[str]) -> list[str]:
-        for p in patterns:
-            try:
-                re.compile(p, re.IGNORECASE)
-            except re.error as e:
-                raise ValueError(f"pattern {p!r} doesn't compile: {e}") from e
-        return patterns
+        return _compile_all(patterns)
 
 
 class Risk(_Strict):
@@ -88,6 +94,12 @@ class Risk(_Strict):
     handoff_min_tier: Tier
     max_score: int = Field(ge=1)
     signals: dict[str, SignalSpec]
+    reported_speech: list[str] = []  # clauses matching these report someone else's words and are not scored
+
+    @field_validator("reported_speech")
+    @classmethod
+    def _compiles(cls, patterns: list[str]) -> list[str]:
+        return _compile_all(patterns)
 
 
 class StepUp(_Strict):
@@ -150,7 +162,13 @@ def _to_runtime(doc: PolicyFile, source: str, digest: str) -> LoadedPolicy:
         for name, t in doc.tools.items()
     }
     signals = tuple(
-        RiskSignal(name, s.weight, tuple(re.compile(p, re.IGNORECASE) for p in s.patterns))
+        RiskSignal(
+            name,
+            s.weight,
+            tuple(re.compile(p, re.IGNORECASE) for p in s.patterns),
+            per_call=s.per_call,
+            combined_weight=s.combined_weight,
+        )
         for name, s in doc.risk.signals.items()
     )
     policy = PolicyConfig(
@@ -164,6 +182,7 @@ def _to_runtime(doc: PolicyFile, source: str, digest: str) -> LoadedPolicy:
         tool_policies=tools,
         signals=signals,
         max_risk_score=doc.risk.max_score,
+        reported_speech=tuple(re.compile(p, re.IGNORECASE) for p in doc.risk.reported_speech),
     )
     velocity = tuple(VelocityRule(r.tool, r.max_count, r.window_seconds, r.action) for r in doc.velocity)
     step_up = StepUpConfig(
@@ -242,7 +261,13 @@ def summary(loaded: LoadedPolicy) -> str:
         f"caps: {p.max_payment_links_per_call} payment links, ${p.max_usd_per_call:,.0f}, "
         f"{p.max_actions_per_call} actions per call",
         f"risk: threshold {p.risk_threshold}, handoff at {p.handoff_min_tier}+, signals "
-        + ", ".join(f"{s.name}={s.weight}" for s in p.signals),
+        + ", ".join(
+            f"{s.name}={s.weight}"
+            + (f" ({s.combined_weight} with another signal)" if s.combined_weight is not None else "")
+            + (" once per call" if s.per_call else "")
+            for s in p.signals
+        )
+        + f", {len(p.reported_speech)} reported-speech patterns",
         f"step-up: {p.step_up_min_tier}+ (off disables), {loaded.step_up.max_failed_attempts} attempts, "
         f"{loaded.step_up.max_sends_per_call} sends, {loaded.step_up.code_ttl_seconds}s codes",
         f"velocity: {len(loaded.velocity_rules)} rules",

@@ -36,7 +36,7 @@ The social-engineering scorer is deliberately simple (weighted regular expressio
 
 **Negative**
 
-- Regex scoring has false negatives (paraphrase, other languages) and false positives (a caller who really is the owner). The default threshold needs two signal families or repeated pressure; `evals/scenarios.yaml` includes a benign-urgency scenario to keep false positives in check. Tune `POLICY_RISK_THRESHOLD` against real call data.
+- Regex scoring has false negatives (paraphrase, other languages) and false positives (a caller who really is the owner). The default threshold needs two signal families; urgency on its own, however often repeated, stays below it. `evals/scenarios.yaml` includes a benign-urgency scenario, and the simulated callers include a held-out set, to keep both in view (`docs/simulation.md`). Tune `POLICY_RISK_THRESHOLD` against real call data.
 - Rules are configuration of fixed checks, not arbitrary policy. When this ADR was written the rules lived in code and environment variables, with policy-as-code on the roadmap. Since 0.6.0 they live in the reviewed, schema-validated `config/policy.yaml` ([`docs/policy.md`](../policy.md)); a separate policy engine such as OPA or Cedar is still not used.
 
 ## Alternatives considered

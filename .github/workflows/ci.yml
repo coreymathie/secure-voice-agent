@@ -25,10 +25,16 @@ jobs:
         run: python scripts/export_console_data.py --check
       - name: Console sample-company data is current (demo/data/sample_company.json)
         run: python scripts/generate_sample_company.py --check
+      - name: Generated simulated callers are current (evals/personas_generated.yaml)
+        run: python scripts/generate_personas.py --check
+      - name: Held-out simulated callers are current (evals/personas_holdout.yaml)
+        run: python scripts/generate_personas_holdout.py --check
       - name: Call evals (scorecard in the job summary)
         run: python -m evals.run --json eval-results.json
-      - name: Simulated callers (scorecard in the job summary)
+      - name: Simulated callers, development set (scorecard in the job summary; fails on regressions, not on documented known gaps)
         run: python -m evals.simulate --json simulate-results.json
+      - name: Simulated callers, held-out set (scorecard in the job summary; fails on regressions, not on documented known gaps)
+        run: python -m evals.simulate --set holdout --json simulate-holdout-results.json
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -36,6 +42,7 @@ jobs:
           path: |
             eval-results.json
             simulate-results.json
+            simulate-holdout-results.json
 
   console-smoke:
     # Drives every console screen in headless Chromium (scripts/demo_smoke.py): demo mode (Pyodide from the CDN)
@@ -55,3 +62,24 @@ jobs:
         with:
           name: console-screenshots
           path: console-screenshots
+
+  docker:
+    # Builds each Dockerfile (no push) and runs one command inside the image, so a base-image update
+    # (Dependabot bumps the FROM line) is built and smoke-tested before it merges.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dockerfile: Dockerfile
+            tag: secure-voice-agent:ci
+            smoke: python -c "import src.agent.server" && python -m src.safeguards.policy_config config/policy.yaml
+          - dockerfile: Dockerfile.console
+            tag: secure-voice-agent-console:ci
+            smoke: python -c "import src.console_server" && python -m src.safeguards.policy_config config/policy.yaml
+    steps:
+      - uses: actions/checkout@v7
+      - name: Build ${{ matrix.dockerfile }}
+        run: docker build --file "${{ matrix.dockerfile }}" --tag "${{ matrix.tag }}" .
+      - name: Smoke command inside the image
+        run: docker run --rm "${{ matrix.tag }}" sh -c '${{ matrix.smoke }}'

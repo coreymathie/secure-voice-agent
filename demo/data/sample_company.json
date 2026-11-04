@@ -29,6 +29,96 @@
   "ai_cost_per_call_usd": 0.46,
   "note": "Fully loaded member-services cost per handled call and AI cost per call (telephony, speech, model, compute). Illustrative assumptions for the sample company, not measurements."
  },
+ "benchmarks": [
+  {
+   "figure": "Calls answered by the agent",
+   "value": "26,926 in 30 days (0.29 per member)",
+   "basis": "Volume model in generate_sample_company.py: about 1,020 calls on a typical weekday at the start of the period, a weekly shape, payday peaks and three events.",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  },
+  {
+   "figure": "Resolved without a transfer",
+   "value": "69.8%",
+   "basis": "Each intent's resolution rate in scripts/sample_calls.py, with a tuning gain of 10 points over the 90 days.",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  },
+  {
+   "figure": "Average call length",
+   "value": "1m 21s",
+   "basis": "Scripted call timings in scripts/sample_calls.py: the disclosure, the consent prompt and each turn.",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  },
+  {
+   "figure": "Member satisfaction",
+   "value": "4.25 / 5",
+   "basis": "Post-call survey ratings drawn per call outcome in scripts/sample_calls.py.",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  },
+  {
+   "figure": "Member-services cost per agent-handled call",
+   "value": "$5.40",
+   "basis": "ASSUMPTIONS in generate_sample_company.py: fully loaded cost of a call handled by a member-services agent.",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  },
+  {
+   "figure": "AI cost per call",
+   "value": "$0.46",
+   "basis": "ASSUMPTIONS in generate_sample_company.py: telephony, speech, model and compute for one AI-handled call.",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  },
+  {
+   "figure": "Member-services cost avoided",
+   "value": "$93K",
+   "basis": "Calls resolved by the agent times the difference between the two per-call costs above.",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  },
+  {
+   "figure": "Calls after hours",
+   "value": "17.3% of calls",
+   "basis": "Hourly call shape in scripts/sample_calls.py against member-services hours (8am-7pm Mon-Sat).",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  },
+  {
+   "figure": "Fraud attempts stopped",
+   "value": "295 in 30 days",
+   "basis": "Per-call rates in scripts/sample_calls.py (social engineering 0.45%, SIM swap 0.35%, account takeover 0.3%) plus one SIM-swap campaign.",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  },
+  {
+   "figure": "Assets per member",
+   "value": "$15,152",
+   "basis": "COMPANY in generate_sample_company.py: $1.4B in assets and 92,400 members.",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  },
+  {
+   "figure": "Members per branch",
+   "value": "8,400",
+   "basis": "COMPANY in generate_sample_company.py: 92,400 members and 11 branches.",
+   "status": "assumption",
+   "label": "Assumption (no published benchmark verified)",
+   "source": null
+  }
+ ],
  "days": [
   {
    "date": "2026-07-10",
@@ -2270,7 +2360,7 @@
    "date": "2026-10-07",
    "kind": "fraud",
    "title": "Social-engineering attempt stopped",
-   "detail": "A caller claiming to own a business account pressed for a payment link to a new number. Risk score 6 handed the payment to a person; no link was sent.",
+   "detail": "A caller claiming to own a business account pressed for a payment link to a new number. Risk score 7 handed the payment to a person; no link was sent.",
    "call": "CA562fe0b6280646deceb2802f6153cbec"
   },
   {

@@ -216,6 +216,12 @@ def demo_desktop(s: Smoke) -> None:
     s.goto("overview", "#chart-volume svg")
     s.idle()
     s.check("business: tab is labelled as a sample", s.text("#ovtab-business") == "Sample business view")
+    rows = page.locator("#bench-table tbody tr").count()
+    s.check("business: sources panel lists every headline figure", rows == len(SAMPLE["benchmarks"]), f"{rows}")
+    s.check(
+        "business: each figure is cited or labelled an assumption",
+        all(b["source"] or b["label"] in page.locator("#bench-table").text_content() for b in SAMPLE["benchmarks"]),
+    )
     s.check("business: sample company labelled fictional", "fictional" in s.text(".sample-banner").lower())
     s.check("business: eight KPI tiles", page.locator(".tiles.kpis .tile").count() == 8)
     s.check("business: volume chart drawn", page.locator("#chart-volume svg .mark").count() >= 60)
@@ -505,6 +511,27 @@ def demo_desktop(s: Smoke) -> None:
     s.check("evals: call-eval scorecard", page.locator("section[aria-labelledby='ce-h'] tbody tr").count() == 31)
     mt = page.locator("section[aria-labelledby='mt-h'] tbody tr").count()
     s.check("evals: mutation tests listed", mt >= 22, f"{mt}")
+    head = s.text("#sa-h")
+    s.check(
+        "evals: the whole simulated-caller set by set, language and side",
+        page.locator("#sa-table tbody tr").count() == 6 and "Spanish" in s.text("#sa-table") and "397" in head,
+        head,
+    )
+    s.check("evals: known gaps listed with a reason", page.locator("#sa-gaps tbody tr").count() >= 1)
+    held = s.text("#sh-h")
+    s.check(
+        "evals: the held-out set by language and side, with its known gaps",
+        page.locator("#sh-table tbody tr").count() == 4
+        and "276" in held
+        and page.locator("#sh-gaps tbody tr").count() >= 1,
+        held,
+    )
+    ba = s.text("#ba-table")
+    s.check(
+        "evals: before and after the change, development and held-out",
+        page.locator("#ba-table tbody tr").count() == 2 and "Held-out" in ba and "→" in ba,
+        ba[:200],
+    )
     page.click("#ev-browser")
     page.wait_for_selector("#ev-browser-out .callout")
     s.check(

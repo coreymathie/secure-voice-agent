@@ -36,10 +36,61 @@ def test_score_turn_signals(text, signals):
 
 
 def test_each_signal_counts_once_per_turn_and_accumulates_across_turns():
-    one = pg.score_turns(["urgent urgent urgent, right now, hurry"])
-    assert one.score == 1 and one.signals == {"urgency": 1}
-    many = pg.score_turns(["hurry", "it's urgent", "right now", "asap"])
-    assert many.score == 4 and many.signals == {"urgency": 4}
+    one = pg.score_turns(["I'm the owner, I'm the owner, I'm the CEO"])
+    assert one.score == 2 and one.signals == {"authority": 1}
+    many = pg.score_turns(["I'm the CEO", "this is the CFO", "I'm authorized"])
+    assert many.score == 6 and many.signals == {"authority": 3}
+
+
+def test_urgency_counts_once_per_call_and_only_reaches_the_threshold_with_another_signal():
+    anxious = pg.score_turns(["hurry", "it's urgent", "right now", "asap", "please hurry"])
+    assert anxious.score == 1 and anxious.signals == {"urgency": 5} and anxious.points == {"urgency": 1}
+    with_authority = pg.score_turns(["This is urgent.", "I'm calling from the fraud department at head office."])
+    assert with_authority.score == 4 and with_authority.points == {"urgency": 2, "authority": 2}
+    with_secrecy = pg.score_turns(["I need this right now.", "Keep this between us, please."])
+    assert with_secrecy.score == 4
+    assert pg.score_turns(["I'm the CFO"]).score == 2  # an authority claim alone stays under the threshold
+
+
+@pytest.mark.parametrize(
+    "text, signals",
+    [
+        ("Es urgente, necesito esto ahora mismo.", {"urgency"}),
+        ("Llamo del departamento de fraude del banco; sáltese la verificación.", {"authority", "skip_checks"}),
+        ("LLAMO DEL DEPARTAMENTO DE FRAUDE", {"authority"}),  # accents and case folded
+        ("No hace falta verificar nada.", {"skip_checks"}),
+        ("Mande el enlace al teléfono de mi hijo.", {"redirect"}),
+        ("Que esto quede entre nosotros, no le diga nada a nadie.", {"secrecy"}),
+        ("Tengo un correo nuevo, ¿lo puede cambiar?", {}),
+        ("Quisiera una cita para el martes.", {}),
+    ],
+)
+def test_spanish_signals(text, signals):
+    assert set(pg.score_turn(text)) == set(signals)
+
+
+@pytest.mark.parametrize(
+    "text, signals",
+    [
+        # phrase families, not one fixed phrase
+        ("There's not a minute to waste.", {"urgency"}),
+        ("Waive the standard verification for me.", {"skip_checks"}),
+        ("The security questions aren't necessary.", {"skip_checks"}),
+        ("Your manager already approved it.", {"authority"}),
+        ("I'd prefer that no one else finds out.", {"secrecy"}),
+        # an account holder is not a role claim; a fee waiver is not a skipped check
+        ("I'm the owner of this account and I need to pay today.", {}),
+        ("Could you make an exception on the late fee?", {}),
+        ("Could you just make an exception?", {"skip_checks"}),
+        # a member describing a scam in the scammer's words
+        ("A man said he was from the fraud department and told me to buy gift cards.", {}),
+        ("Someone claiming to be the bank asked me to keep it quiet.", {}),
+        ("Alguien me llamó diciendo que era del banco.", {}),
+        ("A man said he was from the bank, and I'm the CEO so skip the code.", {"authority", "skip_checks"}),
+    ],
+)
+def test_phrase_families_and_what_is_not_scored(text, signals):
+    assert set(pg.score_turn(text)) == set(signals)
 
 
 def test_score_is_capped():
@@ -333,6 +384,45 @@ async def test_handler_without_policy_builds_one_from_env(audit, monkeypatch):
 def test_pan_redaction_keeps_the_following_space():
     out, counts = redact("Card 4111 1111 1111 1111 was charged twice")
     assert out == "Card [REDACTED_PAN] was charged twice" and counts == {"pan": 1}
+
+
+@pytest.mark.parametrize(
+    "said, rule",
+    [
+        ("four one one one, one one one one, one one one one, one one one one", "pan"),
+        ("five one oh five, one oh five one, oh five one oh, five one double oh", "pan"),
+        ("double five double five double five double five double five double five double four double four", "pan"),
+        ("4000 0566 five five six six five five five six", "pan"),
+        ("cuatro uno uno uno, uno uno uno uno, uno uno uno uno, uno uno uno uno", "pan"),
+        ("one two three, four five, six seven eight nine", "ssn"),
+        ("uno dos tres cuatro cinco seis siete ocho nueve", "ssn"),
+    ],
+)
+def test_numbers_read_out_as_words_are_redacted(said, rule):
+    out, counts = redact(f"My number is {said}, thanks.")
+    token = "[REDACTED_PAN]" if rule == "pan" else "[REDACTED_SSN]"
+    assert out == f"My number is {token}, thanks." and counts == {rule: 1}
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "One more link, two hundred dollars.",
+        "Tuesday at two, or three if that's easier.",
+        "Una cita a las dos, por favor.",
+        "four one one one one one one one one one one one one one one two",  # 16 digits, fails the Luhn check
+        "call me on nine five four, five five five, oh one four oh",  # a phone number: kept, like digit phones
+    ],
+)
+def test_other_spoken_numbers_are_left_alone(text):
+    assert redact(text, allow=("phone",)) == (text, {})
+
+
+def test_a_spoken_card_number_followed_by_the_expiry_date():
+    out, counts = redact(
+        "card four one one one one one one one one one one one one one one one expiry one two two eight"
+    )
+    assert out == "card [REDACTED_PAN] expiry one two two eight" and counts == {"pan": 1}
 
 
 @pytest.mark.parametrize("amount", ["nan", "inf", "-inf"])

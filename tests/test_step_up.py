@@ -85,6 +85,15 @@ def test_sim_swap_signal_blocks_the_pstn_and_the_reason_stays_out_of_the_result(
     assert "sim" not in shown and "swap" not in shown and "signal" not in shown
 
 
+def test_a_phone_the_member_reported_lost_gets_no_code():
+    """Whoever holds a phone reported lost or stolen would pass a code check, so none is sent to it."""
+    s, _, verifier, _ = session(risk=su.StaticRiskSignals({MOBILE: ["device_reported_lost"]}))
+    out = s.send_code()
+    assert out["status"] == "require_human" and verifier.sent == []
+    assert out["_audit"] == {"step_up": "contact_risk_signal", "signals": ["device_reported_lost"]}
+    assert "lost" not in json.dumps({k: v for k, v in out.items() if k != "_audit"}).lower()
+
+
 def test_non_blocking_signal_is_ignored():
     s, *_ = session(risk=su.StaticRiskSignals({MOBILE: ["new_device_login"]}))
     assert s.send_code()["status"] == "code_sent"

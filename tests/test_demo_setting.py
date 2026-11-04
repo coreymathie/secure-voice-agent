@@ -69,7 +69,13 @@ def test_scenario_and_persona_dates_resolve_against_an_injected_clock(monkeypatc
 
 
 def test_no_fixed_dates_in_scenarios_personas_or_templates():
-    for path in ("evals/scenarios.yaml", "evals/personas.yaml", "demo/app.js"):
+    for path in (
+        "evals/scenarios.yaml",
+        "evals/personas.yaml",
+        "evals/personas_generated.yaml",
+        "evals/personas_holdout.yaml",
+        "demo/app.js",
+    ):
         text = (ROOT / path).read_text()
         assert not re.search(r"20\d\d-\d\d-\d\dT", text), path
     assert not any(v[:4].isdigit() for v in _start_isos(demo.SCENARIOS))
@@ -101,7 +107,7 @@ def test_guided_scenarios_take_place_in_florida():
 
 
 def test_eval_scenarios_and_personas_use_credit_union_terms_and_numbers():
-    for path in (harness.SCENARIOS_PATH, simulate.PERSONAS_PATH):
+    for path in (harness.SCENARIOS_PATH, simulate.PERSONAS_PATH, simulate.GENERATED_PATH, simulate.HOLDOUT_PATH):
         text = path.read_text()
         assert not OTHER_BUSINESSES.search(text), (path.name, OTHER_BUSINESSES.search(text))
         assert "customers:" not in text and "Customer" not in text
