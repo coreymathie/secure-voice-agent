@@ -68,6 +68,7 @@ function showTip(evt, value, label, color) {
   if (!t) return;
   t.replaceChildren();
   const b = document.createElement("b");
+  b.setAttribute("translate", "no");
   b.textContent = value;
   const row = document.createElement("span");
   if (color) {
@@ -143,7 +144,10 @@ function tableView(head, rows) {
     r.forEach((c, i) => {
       const td = tr.insertCell();
       td.textContent = c;
-      if (i > 0) td.className = "num";
+      if (i > 0) {
+        td.className = "num";
+        td.setAttribute("translate", "no");
+      }
     });
   }
   wrap.append(table);
@@ -184,7 +188,7 @@ export function stackedBars(container, {rows, series, unit = ""}) {
     const totals = rows.map((r) => series.reduce((a, s) => a + (r.values[s.key] || 0), 0));
     const max = niceMax(Math.max(1, ...totals));
     const height = TOP + rows.length * (BAR + GAP) + AXIS;
-    const svg = el("svg", {viewBox: `0 0 ${width} ${height}`, width, height, role: "group"}, host);
+    const svg = el("svg", {viewBox: `0 0 ${width} ${height}`, width, height, role: "group", translate: "no"}, host);
     const base = Math.min(170, Math.round(width * 0.36));
     const labelW = Math.max(base, Math.min(Math.round(width * 0.5), Math.ceil(labelWidth(svg, rows.map((r) => r.label))) + 12));
     const valueW = 34;
@@ -233,7 +237,7 @@ export function bars(container, {rows, color = "var(--series-1)", name = "count"
   frame(container, rows.length, (host, width) => {
     const max = niceMax(Math.max(1, ...rows.map((r) => r.value)));
     const height = TOP + rows.length * (BAR + GAP) + AXIS;
-    const svg = el("svg", {viewBox: `0 0 ${width} ${height}`, width, height, role: "group"}, host);
+    const svg = el("svg", {viewBox: `0 0 ${width} ${height}`, width, height, role: "group", translate: "no"}, host);
     const base = Math.min(210, Math.round(width * 0.44));
     const labelW = Math.max(base, Math.min(Math.round(width * 0.56), Math.ceil(labelWidth(svg, rows.map((r) => r.label))) + 12));
     const plotW = width - labelW - 40;
@@ -267,7 +271,7 @@ export function columns(container, {points, series, unit = ""}) {
   frame(container, points.length, (host, width) => {
     const totals = points.map((p) => series.reduce((a, s) => a + (p.values[s.key] || 0), 0));
     const max = niceMax(Math.max(1, ...totals));
-    const svg = el("svg", {viewBox: `0 0 ${width} ${H}`, width, height: H, role: "group"}, host);
+    const svg = el("svg", {viewBox: `0 0 ${width} ${H}`, width, height: H, role: "group", translate: "no"}, host);
     const left = Math.max(40, Math.ceil(labelWidth(svg, [max.toLocaleString("en-US")])) + 10);
     const plotW = width - left - 6;
     const plotH = H - TOP - AXIS;
@@ -316,5 +320,5 @@ export function sparkline(values, {width = 120, height = 28, color = "var(--acce
   ]);
   const d = pts.map(([x, yy], i) => `${i ? "L" : "M"}${x.toFixed(1)},${yy.toFixed(1)}`).join("");
   const [lx, ly] = pts[pts.length - 1];
-  return `<svg class="spark" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.4" fill="${color}"/></svg>`;
+  return `<svg class="spark" translate="no" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" aria-hidden="true"><path d="${d}" fill="none" stroke="${color}" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/><circle cx="${lx.toFixed(1)}" cy="${ly.toFixed(1)}" r="2.4" fill="${color}"/></svg>`;
 }

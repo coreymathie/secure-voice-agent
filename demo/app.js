@@ -4,12 +4,12 @@ import {detectMode, getToken, makeAdapter, setToken} from "./adapters.js";
 import {bars, columns, sparkline, stackedBars} from "./charts.js";
 import {latestCallsHtml, leaveMemberCall, renderMemberCall, renderMemberCalls, wireMemberRows} from "./members.js";
 import {loadCalls, loadCompany, longDay, shifted, shortDay} from "./sample.js";
+import {fig, moneyShort, num, unitPrice, usd} from "./format.js";
 import {crumbs, initShell, openKeys, setActive} from "./shell.js";
 
 const $ = (s, root = document) => root.querySelector(s);
 const $$ = (s, root = document) => Array.from(root.querySelectorAll(s));
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
-const usd = (n) => "$" + Number(n || 0).toLocaleString("en-US", {maximumFractionDigits: 2});
 const fmtClock = (s) => {
   s = Number(s || 0);
   if (s >= 3600) return `T+${Math.floor(s / 3600)}h${Math.floor((s % 3600) / 60)}m`;
@@ -107,7 +107,7 @@ const CONTROL_NAMES = {
   velocity_denied: "Velocity limit",
   handoff_required: "Velocity handoff",
   payment_link_cap: "Payment-link cap",
-  usd_cap: "Per-call USD cap",
+  usd_cap: "Per-call dollar cap",
   action_cap: "Per-call action cap",
   step_up_locked_gate: "Locked caller hands off",
   destination_pinned: "Payment destination pinned",
@@ -203,14 +203,17 @@ const SCREENS = {overview: renderOverview, playground: renderPlayground, calls: 
 
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-  const screen = !parts.length ? "overview" : SCREENS[parts[0]] && parts[0] !== "notfound" ? parts[0] : "notfound";
+  const screen = !parts.length ? "evals" : SCREENS[parts[0]] && parts[0] !== "notfound" ? parts[0] : "notfound";
   return {screen, rest: parts.slice(1)};
 }
 
 // Screens that read only the sample data files: they render before (or without) the Python runtime.
-const isStatic = (screen, sub) => (screen === "overview" && !sub) || (screen === "calls" && !sub) || screen === "call" || screen === "notfound";
+// Evals renders the committed, measured results from demo/data/evals.json; the re-run buttons appear once the runtime is up.
+const isStatic = (screen, sub) => screen === "evals" || (screen === "overview" && !sub) || (screen === "calls" && !sub) || screen === "call" || screen === "notfound";
 
 async function route() {
+  // The console opens on the measured safety tests; an empty address becomes #/evals so links and the tour line up.
+  if (!location.hash.replace(/^#\/?/, "")) history.replaceState(null, "", "#/evals");
   const {screen, rest} = parseRoute();
   // #/calls/test is the session's own calls; #/calls/<id> opens one of them in the drawer over that list
   const sub = screen === "calls" ? (rest[0] ? "test" : "") : SUBPAGED.has(screen) ? rest[0] || "" : "";
@@ -277,7 +280,7 @@ async function renderOverview(view, rest) {
 }
 
 function ovTabs(active) {
-  const tabs = [["business", "Business impact", "#/overview"], ["session", "Test session", "#/overview/session"]];
+  const tabs = [["business", "Sample business view", "#/overview"], ["session", "Test session", "#/overview/session"]];
   return `<div class="tabs" role="tablist" aria-label="Overview">${tabs.map(([k, label, href]) => `<a role="tab" href="${href}" aria-selected="${k === active}" id="ovtab-${k}">${label}</a>`).join("")}</div>`;
 }
 
@@ -310,7 +313,7 @@ async function renderSessionOverview(view) {
   <section class="tiles" aria-label="Measured results">
     ${tile("Call-eval pass rate", ce.total ? `${rateLabel}` : "—", ce.total ? `${ce.passed}/${ce.total} scenarios` : "no eval data", "measured", true)}
     ${tile("Simulated callers as expected", sim ? `${sim.expectations_met}<small> / ${sim.personas}</small>` : "—", sim ? `false-positive rate ${Math.round(sim.false_positive_rate * 100)}%` : "", "measured", true)}
-    ${tile("Mutation tests caught", mt.total ? `${mt.passed}<small> / ${mt.total}</small>` : "—", "a control switched off, the evals fail", "measured", true)}
+    ${tile("Mutation tests caught", mt.total ? `${mt.passed}<small> / ${mt.total}</small>` : "—", "a control switched off or weakened, the evals fail", "measured", true)}
   </section>
   <p class="hint">Green-topped tiles are <span class="tag measured">measured</span> by the repo's own eval scripts (${esc(ev.generated_at || "not exported")}, see Evals). The rest count this session's <span class="tag sim">simulated</span> calls.</p>
   <div class="grid two">
@@ -339,7 +342,7 @@ async function renderSessionOverview(view) {
 }
 const sum = (o) => Object.entries(o).filter(([k]) => k !== "rejected" && k !== "error").reduce((a, [, v]) => a + v, 0);
 function tile(k, v, s, kind = "sim", raw = false) {
-  return `<div class="tile ${kind}"><div class="k">${esc(k)}</div><div class="v">${raw ? v : esc(v)}</div>${s ? `<div class="s">${esc(s)}</div>` : ""}</div>`;
+  return `<div class="tile ${kind}"><div class="k">${esc(k)}</div><div class="v" translate="no">${raw ? v : esc(v)}</div>${s ? `<div class="s" translate="no">${esc(s)}</div>` : ""}</div>`;
 }
 function tryCard(title, text, button, key) {
   return `<div class="try-card"><h3>${esc(title)}</h3><p>${esc(text)}</p><button type="button" data-try="${key}">${esc(button)}</button></div>`;
@@ -377,19 +380,10 @@ async function tryAction(key, btn) {
   }
 }
 
-// ---------- Overview: business impact (sample company) ----------
+// ---------- Overview: sample business view (sample company) ----------
 
 const RANGES = [[7, "7 days"], [30, "30 days"], [90, "90 days"]];
 const pct = (n, d = 0) => `${(Number(n || 0) * 100).toFixed(d)}%`;
-const num = (n) => Number(n || 0).toLocaleString("en-US");
-const money0 = (n) => "$" + Math.round(Number(n || 0)).toLocaleString("en-US");
-const moneyShort = (n) => {
-  n = Number(n || 0);
-  if (n >= 1e9) return `$${(n / 1e9).toFixed(1)}B`;
-  if (n >= 1e6) return `$${(n / 1e6).toFixed(n >= 1e7 ? 1 : 2)}M`;
-  if (n >= 1e4) return `$${Math.round(n / 1e3)}K`;
-  return money0(n);
-};
 const mmss = (secs) => `${Math.floor(secs / 60)}m ${String(Math.round(secs % 60)).padStart(2, "0")}s`;
 const BANNER_KEY = "sva-sample-banner";
 const bannerHidden = () => { try { return localStorage.getItem(BANNER_KEY) === "hidden"; } catch { return false; } };
@@ -421,7 +415,7 @@ function delta(cur, prev, {better = "up", kind = "pct"} = {}) {
 }
 
 function kpi(k, v, sub, d, spark) {
-  return `<div class="tile kpi sample"><div class="k">${esc(k)}</div><div class="v">${v}</div><div class="kpi-foot">${d}${spark}</div>${sub ? `<div class="s">${sub}</div>` : ""}</div>`;
+  return `<div class="tile kpi sample"><div class="k">${esc(k)}</div><div class="v" translate="no">${v}</div><div class="kpi-foot" translate="no">${d}${spark}</div>${sub ? `<div class="s" translate="no">${sub}</div>` : ""}</div>`;
 }
 
 async function renderBusiness(view) {
@@ -446,8 +440,8 @@ async function renderBusiness(view) {
     `<div class="seg" role="group" aria-label="Date range">${RANGES.map(([n, label]) => `<button type="button" data-range="${n}" aria-pressed="${n === range}">${label}</button>`).join("")}</div>
      <button type="button" class="primary" data-go="#/calls">View calls</button><button type="button" data-go="#/playground">Test the agent</button>`,
   ) + ovTabs("business") + `
-  ${bannerHidden() ? "" : `<div class="sample-banner" role="note" id="sample-banner"><p><b>Sample workspace.</b> ${esc(co.name)} is a fictional credit union (${num(co.members)} members, ${moneyShort(co.assets_usd)} in assets, ${co.branches} branches). Its members, calls and numbers are generated for this demo<span class="tech-only"> by <code>${esc(data.generated_by)}</code> (seed ${esc(data.seed)})</span>; the safety test results under <a href="#/evals">Evals</a> are measured on the real code.</p><button type="button" class="ghost sm" id="banner-x" aria-label="Dismiss the sample workspace note">Dismiss</button></div>`}
-  <p class="period muted small">${esc(period)} · ${range} days${p ? ` · compared with the ${range} days before` : ""}</p>
+  ${bannerHidden() ? "" : `<div class="sample-banner" role="note" id="sample-banner"><p><b>Sample workspace.</b> ${esc(co.name)} is a fictional credit union (${fig(num(co.members))} members, ${fig(moneyShort(co.assets_usd))} in assets, ${fig(co.branches)} branches). Its members, calls and numbers are generated for this demo<span class="tech-only"> by <code>${esc(data.generated_by)}</code> (seed ${esc(data.seed)})</span>; the safety test results under <a href="#/evals">Evals</a> are measured on the real code.</p><button type="button" class="ghost sm" id="banner-x" aria-label="Dismiss the sample workspace note">Dismiss</button></div>`}
+  <p class="period muted small" translate="no">${esc(period)} · ${range} days${p ? ` · compared with the ${range} days before` : ""}</p>
   <section class="tiles kpis" aria-label="Key results">
     ${kpi("Calls answered by the agent", num(t.calls), `${num(Math.round(t.calls / range))} a day · ${num(t.after_hours)} after hours`, delta(t.calls, p?.calls), sparkline(series((d) => d.calls)))}
     ${kpi("Resolved without a transfer", pct(t.containment, 1), `${num(t.contained)} calls fully handled`, delta(t.containment, p?.containment, {kind: "pts"}), sparkline(series((d) => d.contained / d.calls)))}
@@ -456,7 +450,7 @@ async function renderBusiness(view) {
     ${kpi("Fraud attempts stopped", num(t.fraud_blocked), "social engineering, SIM swaps, takeovers", delta(t.fraud_blocked, p?.fraud_blocked, {better: "none"}), sparkline(series((d) => d.fraud_blocked), {color: "var(--warm)"}))}
     ${kpi("Step-up codes passed", pct(t.stepup_rate, 1), `${num(t.stepup_passed)} of ${num(t.stepups)} one-time codes; no payment without one`, delta(t.stepup_rate, p?.stepup_rate, {kind: "pts"}), sparkline(series((d) => d.stepup_passed / d.stepups)))}
     ${kpi("Member satisfaction", `${t.csat_avg.toFixed(2)}<small> / 5</small>`, "post-call survey", delta(t.csat_avg, p?.csat_avg), sparkline(series((d) => d.csat)))}
-    ${kpi("Member-services cost avoided", moneyShort(saved), `at $${a.agent_cost_per_call_usd.toFixed(2)} per agent call vs $${a.ai_cost_per_call_usd.toFixed(2)} per AI call`, delta(saved, p ? p.contained * (a.agent_cost_per_call_usd - a.ai_cost_per_call_usd) : null), sparkline(series((d) => d.contained)))}
+    ${kpi("Member-services cost avoided", moneyShort(saved), `at ${unitPrice(a.agent_cost_per_call_usd)} per agent call vs ${unitPrice(a.ai_cost_per_call_usd)} per AI call`, delta(saved, p ? p.contained * (a.agent_cost_per_call_usd - a.ai_cost_per_call_usd) : null), sparkline(series((d) => d.contained)))}
   </section>
   <section class="card" aria-labelledby="vol-h">
     <div class="card-head"><h2 id="vol-h">Daily call volume and outcome</h2><p class="hint">Every call is answered by the agent first. Calls it can't finish go to member services with the context attached.</p></div>
@@ -481,7 +475,7 @@ async function renderBusiness(view) {
       <section class="card" aria-labelledby="risk-h">
         <div class="card-head"><h2 id="risk-h">Fraud attempts stopped</h2><p class="hint">Stopped before any money moved.</p></div>
         <div id="chart-risk"></div>
-        <p class="hint" id="lockouts-note">Not counted as fraud: ${num(t.otp_lockouts)} verification lockouts (three wrong codes on one call), handed to member services.</p>
+        <p class="hint" id="lockouts-note">Not counted as fraud: ${fig(num(t.otp_lockouts))} verification lockouts (three wrong codes on one call), handed to member services.</p>
         <a class="card-link" href="#/playground/scenarios">See each control in a guided scenario →</a>
       </section>
       <section class="card" aria-labelledby="xfer-h">
@@ -500,10 +494,10 @@ async function renderBusiness(view) {
       <dl class="facts wide">
         <div><dt>Organization</dt><dd>${esc(co.name)}</dd></div>
         <div><dt>Industry</dt><dd>${esc(co.industry)}</dd></div>
-        <div><dt>Members</dt><dd>${num(co.members)}</dd></div>
-        <div><dt>Assets</dt><dd>${moneyShort(co.assets_usd)}</dd></div>
+        <div><dt>Members</dt><dd translate="no">${num(co.members)}</dd></div>
+        <div><dt>Assets</dt><dd translate="no">${moneyShort(co.assets_usd)}</dd></div>
         <div><dt>Branches</dt><dd>${co.branches}, South Florida</dd></div>
-        <div><dt>Staff</dt><dd>${num(co.employees)}</dd></div>
+        <div><dt>Staff</dt><dd translate="no">${num(co.employees)}</dd></div>
         <div><dt>Contact center</dt><dd>${esc(co.contact_center)}</dd></div>
         <div><dt>Oversight</dt><dd>${co.regulators.map(esc).join(", ")}</dd></div>
       </dl>
@@ -533,7 +527,7 @@ function intentTable(intents, scale) {
   const total = intents.reduce((a, i) => a + i.calls_30d, 0);
   const TOOL = {take_payment: "Payment link or keypad", create_ticket: "Case opened", book_meeting: "Appointment booked", log_lead: "Lead to lending", update_contact: "Contact update (verified)"};
   return `<div class="table-wrap"><table class="intents"><thead><tr><th>Reason for calling</th><th class="num">Calls</th><th>Resolved by the agent</th></tr></thead><tbody>
-    ${intents.map((i) => `<tr><td class="wrap">${esc(i.intent)}<span class="share">${pct(i.calls_30d / total)} of calls · ${esc(TOOL[i.tool] || "Answered on the call")}</span></td><td class="num">${num(Math.round(i.calls_30d * scale))}</td><td><span class="meter-bar" role="img" aria-label="${pct(i.containment)} resolved"><i style="width:${(i.containment * 100).toFixed(1)}%"></i></span> <span class="nw">${pct(i.containment)}</span></td></tr>`).join("")}
+    ${intents.map((i) => `<tr><td class="wrap">${esc(i.intent)}<span class="share">${fig(pct(i.calls_30d / total))} of calls · ${esc(TOOL[i.tool] || "Answered on the call")}</span></td><td class="num" translate="no">${num(Math.round(i.calls_30d * scale))}</td><td translate="no"><span class="meter-bar" role="img" aria-label="${pct(i.containment)} resolved"><i style="width:${(i.containment * 100).toFixed(1)}%"></i></span> <span class="nw">${pct(i.containment)}</span></td></tr>`).join("")}
   </tbody></table></div>`;
 }
 
@@ -545,7 +539,7 @@ function complianceList(c, t) {
     ["ok", "Card numbers read aloud, scrubbed before storage", num(t.card_numbers_scrubbed), "Removed from the transcript, the case and the CRM note before saving; card payments go through the keypad"],
     ["ok", "Identifiers scrubbed before leaving the agent", num(t.pii_scrubbed), "Card numbers and SSNs removed from transcripts, tickets, CRM notes and logs"],
   ];
-  return `<ul class="checklist">${rows.map(([k, label, v, why]) => `<li class="${k}"><span class="ck" aria-hidden="true">✓</span><div><b>${esc(label)}</b><span class="hint">${esc(why)}</span></div><span class="cv">${esc(v)}</span></li>`).join("")}</ul>`;
+  return `<ul class="checklist">${rows.map(([k, label, v, why]) => `<li class="${k}"><span class="ck" aria-hidden="true">✓</span><div><b>${esc(label)}</b><span class="hint">${esc(why)}</span></div><span class="cv" translate="no">${esc(v)}</span></li>`).join("")}</ul>`;
 }
 
 // Nav badge + palette "Recent" entries, refreshed whenever a screen loads the call list.
@@ -809,7 +803,7 @@ function paintPending(d) {
 
 function meter(label, val, max, shown, maxShown = max) {
   const pct = max ? Math.min(100, (val / max) * 100) : 0;
-  return `<div class="meter"><div class="k">${esc(label)}</div><div class="v">${shown} <small>/ ${esc(maxShown)}</small></div><div class="bar ${val >= max ? "hot" : ""}" role="meter" aria-valuemin="0" aria-valuemax="${esc(max)}" aria-valuenow="${esc(val)}" aria-label="${esc(label)}"><i style="width:${pct}%"></i></div></div>`;
+  return `<div class="meter"><div class="k">${esc(label)}</div><div class="v" translate="no">${shown} <small>/ ${esc(maxShown)}</small></div><div class="bar ${val >= max ? "hot" : ""}" role="meter" aria-valuemin="0" aria-valuemax="${esc(max)}" aria-valuenow="${esc(val)}" aria-label="${esc(label)}"><i style="width:${pct}%"></i></div></div>`;
 }
 
 function paintSide(d) {
@@ -826,7 +820,7 @@ function paintSide(d) {
     <div class="meters">
       ${meter("Caller risk score", p.risk_score, p.risk_threshold, esc(p.risk_score))}
       ${meter("Payment links", p.payment_links_issued, p.max_payment_links_per_call, esc(p.payment_links_issued))}
-      ${meter("USD issued", p.usd_issued, p.max_usd_per_call, esc(usd(p.usd_issued)), usd(p.max_usd_per_call))}
+      ${meter("Amount issued", p.usd_issued, p.max_usd_per_call, esc(usd(p.usd_issued)), usd(p.max_usd_per_call))}
       ${meter("Actions completed", p.actions_completed, p.max_actions_per_call, esc(p.actions_completed))}
     </div>
     <p class="hint" style="margin-top:8px">${p.contact_changed ? '<span class="pill warn">contact changed this call</span> ' : ""}<span class="tech-only">Policy ${esc(d.policy_ref)} · </span>verification needed for ${esc(p.step_up_min_tier)}-risk actions and above · recording ${esc(d.recording || "n/a")}</p>
@@ -1316,7 +1310,7 @@ function policyView(p) {
     ${p.tools.map((t) => `<tr><td class="mono">${esc(t.name)}</td><td><span class="tier ${esc(t.tier)}">${esc(t.tier)}</span>${t.enabled ? "" : ' <span class="pill bad">disabled</span>'}</td><td class="hide-sm tiny">${[t.moves_money && "moves money", t.changes_contact && "changes contact", !t.state_changing && "read-only"].filter(Boolean).join(", ")}</td><td class="hide-sm tiny wrap">${esc(t.why)}</td></tr>`).join("")}
   </tbody></table></div>
   <div class="grid kv-pair" style="margin-top:12px">
-    <dl class="kv"><dt>Payment links / call</dt><dd>${esc(p.caps.max_payment_links_per_call)}</dd><dt>USD / call</dt><dd>${esc(usd(p.caps.max_usd_per_call))}</dd><dt>Actions / call</dt><dd>${esc(p.caps.max_actions_per_call)}</dd><dt>Risk threshold</dt><dd>${esc(p.risk.threshold)} (handoff at ${esc(p.risk.handoff_min_tier)}+)</dd></dl>
+    <dl class="kv"><dt>Payment links / call</dt><dd>${esc(p.caps.max_payment_links_per_call)}</dd><dt>Dollars / call</dt><dd translate="no">${esc(usd(p.caps.max_usd_per_call))}</dd><dt>Actions / call</dt><dd>${esc(p.caps.max_actions_per_call)}</dd><dt>Risk threshold</dt><dd>${esc(p.risk.threshold)} (handoff at ${esc(p.risk.handoff_min_tier)}+)</dd></dl>
     <dl class="kv"><dt>Step-up at</dt><dd>${esc(p.step_up.min_tier)}</dd><dt>Wrong codes before lock</dt><dd>${esc(p.step_up.max_failed_attempts)}</dd><dt>Code lifetime</dt><dd>${esc(p.step_up.code_ttl_seconds)} s</dd><dt>Blocking signals</dt><dd class="tiny">${esc(p.step_up.blocking_signals.join(", "))}</dd></dl>
   </div>
   <h3 style="margin:12px 0 6px">Risk signals</h3><div class="chips">${p.risk.signals.map((s) => `<span class="chip neutral">${esc(s.name)} · weight ${esc(s.weight)} · ${esc(s.patterns)} patterns</span>`).join("")}</div>
@@ -1325,10 +1319,24 @@ function policyView(p) {
 
 // ---------- Evals ----------
 
+// The committed results (demo/data/evals.json), read straight from the file so the Evals screen, the console's
+// landing page, shows the measured results before the Python runtime has started (or where it is blocked).
+let committedEvals = null;
+async function loadCommittedEvals() {
+  if (committedEvals) return committedEvals;
+  const r = await fetch("./data/evals.json", {cache: "no-cache"});
+  if (!r.ok) throw new Error(`Couldn't load the measured eval results (HTTP ${r.status})`);
+  committedEvals = await r.json();
+  return committedEvals;
+}
+
+let evalsRender = 0;
 async function renderEvals(view) {
+  const mine = ++evalsRender;
   const lede = "Every safeguard is tested before release. Scripted calls check each control does its job, simulated callers check ordinary members get through while fraudsters don't, and if anyone weakens a control the tests fail.<span class=\"tech-only\"> Call evals and simulated callers run the real Lambda handler code with signed requests against faked outside services; mutation tests switch a control off and confirm the evals notice.</span>";
   view.innerHTML = head("Evals", lede) + loadingHtml();
-  const data = await call("evals");
+  const data = S.ready ? await call("evals") : {committed: await loadCommittedEvals()};
+  if (mine !== evalsRender) return; // a newer render (the runtime finished starting) owns the screen
   const c = data.committed || {};
   const live = S.evalsLive || data.live;
   const ce = (live && live.call_evals) || c.call_evals;
@@ -1343,14 +1351,17 @@ async function renderEvals(view) {
     return;
   }
   const m = sc.metrics;
-  const action = S.adapter.can("server_evals")
-    ? '<button type="button" class="primary" id="ev-run">Re-run evals on the server</button>'
-    : '<button type="button" id="ev-browser">Re-run the simulated callers in your browser</button>';
+  const action = !S.ready
+    ? `<span class="hint" id="ev-wait">${S.engine === "error" ? "Re-running needs the test engine, which couldn't start here." : "Starting the test engine to re-run them…"}</span>`
+    : S.adapter.can("server_evals")
+      ? '<button type="button" class="primary" id="ev-run">Re-run evals on the server</button>'
+      : '<button type="button" id="ev-browser">Re-run the simulated callers in your browser</button>';
   view.innerHTML = head("Evals", lede, action) + `
   <p class="hint">${source}</p>
+  <p class="hint" id="ev-sample-note">These results are measured on this repository's code. The <a href="#/overview">sample business view</a> under Overview shows generated numbers for a fictional credit union.</p>
   <section class="tiles">
     ${tile("Call evals", `${ce.passed}<small> / ${ce.total}</small>`, "scripted calls, one per risk", "measured", true)}
-    ${mt ? tile("Mutation tests", `${mt.passed}<small> / ${mt.total}</small>`, "controls switched off, caught", "measured", true) : ""}
+    ${mt ? tile("Mutation tests", `${mt.passed}<small> / ${mt.total}</small>`, "switched off or weakened, caught", "measured", true) : ""}
     ${tile("Simulated callers", `${m.expectations_met}<small> / ${m.personas}</small>`, "handled as expected", "measured", true)}
     ${tile("Task success", `${m.task_success.achieved}<small> / ${m.task_success.of}</small>`, "benign + impatient", "measured", true)}
     ${tile("Correct refusals", `${m.correct_refusals.blocked}<small> / ${m.correct_refusals.of}</small>`, "adversarial", "measured", true)}
@@ -1467,12 +1478,12 @@ function wireToken(view) {
 // ---------- guided tour ----------
 
 const TOUR = [
-  {hash: "#/overview", sel: ".tiles.kpis", title: "How the agent is doing", text: "Calls answered, how many the agent resolved without a transfer, payments collected and fraud attempts stopped, compared with the period before."},
+  {hash: "#/evals", sel: "#ce-h", title: "Tested before every release", text: "The console opens on the safety tests, measured on the real code. Every safeguard has an automated test; if someone weakens a control, the tests fail before it ships."},
+  {hash: "#/overview", sel: ".tiles.kpis", title: "Sample business view", text: "Generated numbers for a fictional credit union: calls answered, how many the agent resolved without a transfer, payments collected and fraud attempts stopped, compared with the period before."},
   {hash: "#/calls", sel: "table.calls", title: "Every call, searchable", text: "Each call the agent answered: who called, why, what happened, and which safeguards stepped in. Filter by reason or outcome, or export to CSV."},
   {hash: () => `#/call/${encodeURIComponent((S.memberCalls.find((c) => c.flags.includes("Fraud stopped")) || S.memberCalls[0] || {}).id || "")}`, sel: ".replay", title: "Inside one call", text: "A fraud attempt the agent stopped. Replay the conversation and watch each safeguard step in: verification, the risk score, and the handoff to a person."},
   {hash: "#/playground", sel: ".chat-card", title: "Try to fool it yourself", text: "Play the caller. Ask to pay, change your email, or pressure the agent with urgency and a new phone number, and see what the real safeguard code allows."},
   {hash: "#/policies", sel: ".pol-grid", title: "Rules you control", text: "The agent's rules live in one policy file: limits, verification, risk signals. Change one, then re-run a call to compare the outcome side by side."},
-  {hash: "#/evals", sel: "#ce-h", title: "Tested before every release", text: "Every safeguard has an automated test. If someone weakens a control, the tests fail before it ships."},
 ];
 const TOUR_KEY = "sva-tour-done";
 let tourStep = 0;
@@ -1625,7 +1636,7 @@ async function boot() {
     document.body.dataset.ready = "error";
   }
   paintBadge();
-  if (!isStatic(CUR.screen, CUR.sub)) { S.screen = null; await route(); }
+  if (!isStatic(CUR.screen, CUR.sub) || CUR.screen === "evals") { S.screen = null; await route(); }
 }
 
 // ---------- global wiring ----------

@@ -104,8 +104,9 @@ def run_pytest() -> dict:
         "pytest": {"command": "pytest -q", "total": len(cases), **counts},
         "mutation_tests": {
             "command": "pytest tests/test_evals.py tests/test_simulate.py (mutation tests)",
-            "about": "Each test switches off one control (or weakens the policy file) and passes only if the "
-            "evals or the simulator then fail.",
+            "about": "Each test switches off or weakens one safeguard (in code, or in an edited copy of the policy "
+            "file) and passes only if the evals or the simulator then fail. Two of them lower the risk threshold to 1 "
+            "and check that a benign caller being blocked is caught.",
             "passed": sum(m["passed"] for m in mutations),
             "total": len(mutations),
             "tests": mutations,

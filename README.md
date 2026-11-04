@@ -15,21 +15,21 @@
 | **Architecture** | Twilio → one long-lived Pipecat worker per call (Fly.io or ECS) → safeguard layer → HMAC-signed, idempotent tool handlers on AWS Lambda + DynamoDB. |
 | **Key decisions** | Safeguards in code, not prompts or a judge model; provider-independent (speech-to-speech default, cascaded as a swap); payment links pinned to the calling number. [4 ADRs](#key-decisions-and-trade-offs). |
 | **Controls** | Default-deny allow-list, social-engineering scoring, step-up verification to the phone on file, per-call caps, velocity limits, identifier scrubbing, hash-chained audit, idempotency, signed requests. Policy as code in [`config/policy.yaml`](config/policy.yaml). |
-| **Evidence** | 458 pytest tests, including 22 mutation tests that switch controls off; 31/31 call evals; 14 simulated callers (7/7 benign served, 7/7 adversarial stopped, 0 benign blocked; scripted and text-level, not a measured rate on real calls); a 145-check browser smoke test of the console. |
+| **Evidence** | 462 pytest tests, including 22 mutation tests that each switch off or weaken one safeguard and confirm the evals or the simulator fail; 31/31 call evals; 14 simulated callers (7/7 benign served, 7/7 adversarial stopped, 0 benign blocked; scripted and text-level, not a measured rate on real calls); a 165-check browser smoke test of the console. |
 | **Out of scope** | No latency or cost figures are published (none have been measured here); no live model or synthetic speech drives the evals; Twilio `<Pay>`, Twilio Verify and SIM-swap data sources are not exercised; nothing here is a compliance certification. |
-| **Try it** | [Live console](https://coreymathie.github.io/secure-voice-agent/demo/): the repo's real safeguard code running in the browser through Pyodide. No backend, no keys. |
+| **Try it** | [Live console](https://coreymathie.github.io/secure-voice-agent/demo/): opens on the evals measured on the real code; the interactive screens run the repo's real safeguard code in the browser through Pyodide. No backend, no keys. |
 
 ## Live demo
 
 **[Open the live console](https://coreymathie.github.io/secure-voice-agent/demo/)**
 
-[![The Secure Voice Agent console: business impact for a sample credit union, with calls answered, containment, payments collected, fraud attempts stopped and cost avoided](docs/img/console.png)](https://coreymathie.github.io/secure-voice-agent/demo/)
+[![The Secure Voice Agent console opening on Evals: the 31 call evals and the mutation tests, measured on the repository's code](docs/img/console.png)](https://coreymathie.github.io/secure-voice-agent/demo/)
 
-The console is the operating view a credit union's contact-center team would use: business impact, a searchable call history with the safeguards that stepped in on each call, a test line to try to fool the agent, the governing policy, and the evals behind it. Its interactive screens run this repository's real `make_handler()`, `src/safeguards/` and `config/policy.yaml` loader in the browser through Pyodide; outside services are simulated and labelled as such, and no language model is involved. The workspace is **Cypress Harbor Credit Union**, a *fictional* credit union; its data is a labelled **sample**, eval results are labelled **measured**, and calls placed from the test line are kept apart as test calls. Screens, modes, the live-mode API and the sample data are described in [`docs/console.md`](docs/console.md).
+The console opens on **Evals**: the call evals, mutation tests and simulated callers, measured on this repository's code. It is laid out as the operating view a credit union's contact-center team would use: a sample business view, a searchable call history with the safeguards that stepped in on each call, a test line to try to fool the agent, and the governing policy. Its interactive screens run this repository's real `make_handler()`, `src/safeguards/` and `config/policy.yaml` loader in the browser through Pyodide; outside services are simulated and labelled as such, and no language model is involved. The workspace is **Cypress Harbor Credit Union**, a *fictional* credit union; its data is a labelled **sample**, eval results are labelled **measured**, and calls placed from the test line are kept apart as test calls. Screens, modes, the live-mode API and the sample data are described in [`docs/console.md`](docs/console.md).
 
 ## Problem and context
 
-An agent on a real phone number talks to untrusted strangers while holding tools that move money (payment links), send messages and write into systems of record. Two failure patterns dominate in practice:
+A voice agent on a public phone line talks to untrusted callers while holding tools that move money (payment links), send messages and write into systems of record. Two failure patterns dominate in practice:
 
 - **The model gets talked into things.** Urgency ("right now"), authority ("I'm the owner"), "you don't need to verify me", "text it to my assistant's number instead". These are the same social-engineering scripts that drive account takeover in card-fraud and dispute operations.
 - **Sensitive data spreads.** Callers read card numbers and SSNs aloud into ticket bodies and lead notes, and from there into logs and third-party systems.
@@ -45,7 +45,7 @@ The constraints are those of a regulated institution:
 | Auditability and separation of duties | Every decision reproducible; policy changes reviewed | Hash-chained audit log; policy as a reviewed file gated by evals; [`docs/policy.md`](docs/policy.md) |
 | Operating model | Escalations reach a person; outages fail safely | Handoff statuses, safe failure handling; [`docs/operations.md`](docs/operations.md) |
 
-The solution design targets a credit union's member line. The outcomes it is measured on are the ones the console's business-impact view reports for the sample workspace: calls answered, calls resolved without a transfer, payments collected, fraud attempts stopped, the step-up pass rate (no payment without a passed code), member satisfaction, and member-services cost avoided (with its per-call cost assumptions stated).
+The solution design targets a credit union's member line. The outcomes it would be judged on are the ones the console's sample business view reports, with generated numbers, for the sample workspace: calls answered, calls resolved without a transfer, payments collected, fraud attempts stopped, the step-up pass rate (no payment without a passed code), member satisfaction, and member-services cost avoided (with its per-call cost assumptions stated).
 
 ## Reference architecture
 
@@ -110,7 +110,7 @@ The solution design targets a credit union's member line. The outcomes it is mea
 4. **Fail closed where money or identity is at stake.** An invalid policy file stops the process, missing verification hands off, an unpausable recording blocks card capture, and an unreachable shared velocity store denies. The one deliberate exception, idempotency failing open when DynamoDB is down, is documented with its switch.
 5. **Keep regulated data out of scope by design.** Card entry happens on the processor's page or inside Twilio `<Pay>`; identifiers are scrubbed before any backend sees them.
 6. **Bound the blast radius.** Per-call caps and per-caller velocity limits hold even when the risk scorer misses.
-7. **Evidence over assertion.** Every control has a test or eval, and mutation tests prove the evals fail when a control is removed.
+7. **Evidence over assertion.** Every control has a test or eval, and mutation tests confirm the evals fail when a control is removed or weakened.
 
 ## Key decisions and trade-offs
 
@@ -156,11 +156,11 @@ How each control behaves, with its defaults, is in [`docs/controls.md`](docs/con
 
 | Evidence | Result | How it is produced | Label |
 |---|---|---|---|
-| Unit and integration tests | 458 tests (10 are skipped if fakeredis is not installed) | `pytest -q` | measured |
+| Unit and integration tests | 462 tests (10 are skipped if fakeredis is not installed) | `pytest -q` | measured |
 | Call evals | 31/31 scenarios | `python -m evals.run`, through the real stack | measured |
-| Mutation tests | 22 | Part of the pytest suite: 17 switch off one control and confirm the evals fail; 5 do the same for the simulator | measured |
+| Mutation tests | 22 | Part of the pytest suite: 17 in `tests/test_evals.py` switch off or weaken one safeguard and confirm the call evals fail; 5 in `tests/test_simulate.py` do the same for the simulator. 2 of the 22 lower the risk threshold to 1 and confirm a benign caller being blocked is caught. Not counted: 2 tests that a wrong expectation fails, and the tests that run every scenario | measured |
 | Simulated callers | 14 personas: 7/7 benign and impatient callers succeeded, 7/7 adversarial callers stopped, 0 benign callers blocked | `python -m evals.simulate`, a scripted agent and hand-written callers | simulated |
-| Console smoke test | 145 checks across both console modes | `python scripts/demo_smoke.py --live`, headless Chromium | measured |
+| Console smoke test | 165 checks across both console modes | `python scripts/demo_smoke.py --live`, headless Chromium | measured |
 
 **Call evals.** The 31 scenarios ([`evals/scenarios.yaml`](evals/scenarios.yaml)) cover 13 from 0.4.0 (payment bursts, slow-drip payments, replayed requests, provider outages, a card number read into a ticket, a prompt-injected redirect of a payment link, and more), 5 for the policy gate (social-engineering handoff, a benign urgent caller who must *not* be blocked, the per-call USD ceiling, a backend tool the agent was never granted, the per-call action ceiling), 5 for step-up verification (spoofed caller ID, verify-then-pay, code guessing and lockout, a SIM-swap signal, change-the-email-then-pay), 3 for keypad payments (recording paused before capture, capture refused when it can't be paused, amount limit in keypad mode), and 5 for call start (the AI disclosure comes first; declined, silent and granted recording consent; a one-party-state notice). Call-start scenarios run the real webhook Lambdas with Twilio-signed requests.
 
@@ -180,7 +180,7 @@ The harness runs each scenario through `make_handler`, the policy gate, velocity
 | ...                                                                                                         |
 ```
 
-**Mutation tests.** The 17 eval mutations switch off scrubbing, velocity, retry release, idempotency, the policy gate, risk scoring, per-call counters, an over-eager risk threshold, step-up, codes sent to caller ID, the lockout, the takeover rule, the SIM-swap hook, card capture without pausing the recording, recording without consent, silence treated as consent, and a missing AI disclosure. Mutations that weaken the *policy* do it the way a reviewer would: an edited copy of `config/policy.yaml` (lockout raised to 99 attempts, risk threshold lowered to 1) run through the evals, as `python -m evals.run --policy` does.
+**Mutation tests.** The 17 eval mutations (`test_evals_catch_*` in `tests/test_evals.py`) switch off scrubbing, velocity, retry release, idempotency, the policy gate, risk scoring, per-call counters, an over-eager risk threshold, step-up, codes sent to caller ID, the lockout, the takeover rule, the SIM-swap hook, card capture without pausing the recording, recording without consent, silence treated as consent, and a missing AI disclosure. Mutations that weaken the *policy* do it the way a reviewer would: an edited copy of `config/policy.yaml` (lockout raised to 99 attempts, risk threshold lowered to 1) run through the evals, as `python -m evals.run --policy` does. The 5 simulator mutations (`tests/test_simulate.py`) skip step-up, remove the takeover rule, remove default deny, remove scrubbing, and lower the risk threshold. The same file has 2 tests that a deliberately wrong expectation fails (`test_a_wrong_expectation_fails`), which check the harness itself and are not counted as mutation tests.
 
 **Simulated callers** ([`docs/simulation.md`](docs/simulation.md)). 14 scripted multi-turn personas (benign, impatient, social engineers, prompt injectors) run against the real stack with a deliberately gullible scripted agent (no LLM), scored on task success, correct refusals, false-positive rate and handoffs. The result describes 14 hand-written scripts at the text level (no audio, no model); it is not a measured rate on real calls.
 
@@ -242,7 +242,7 @@ Demo mode: `python -m http.server 8000` from the repository root, then open http
 ### Run the checks
 
 ```bash
-ruff check . && ruff format --check . && pytest -q   # 458 tests (10 are skipped if fakeredis is not installed)
+ruff check . && ruff format --check . && pytest -q   # 462 tests (10 are skipped if fakeredis is not installed)
 python -m src.safeguards.policy_config config/policy.yaml   # validate the policy file
 python -m evals.simulate                              # 14 scripted callers, multi-turn
 python -m evals.run                                   # 31/31 scenarios
@@ -266,7 +266,7 @@ src/
   console_server.py  live-mode console: FastAPI app serving demo/ at /console plus its JSON API
 evals/          scenarios.yaml, harness.py, run.py (call evals), personas.yaml + simulate.py + scripted.py (simulated callers),
                 latency.py (p50/p95 from traces)
-demo/           the console: index.html, app.js, adapters.js (Pyodide or live API), charts.js, styles.css,
+demo/           the console: index.html, app.js, adapters.js (Pyodide or live API), charts.js, format.js, styles.css,
                 engine.py (the console engine, run in the browser or by the server), data/evals.json
 scripts/        demo_smoke.py (headless-browser check, both modes), export_console_data.py (demo/data/evals.json)
 config/         policy.yaml: the reviewed policy (tiers, caps, risk signals, step-up, velocity)
