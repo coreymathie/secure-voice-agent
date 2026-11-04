@@ -106,6 +106,38 @@ None of these were tuned away: the safeguards and the expectations are unchanged
 
 Mutation tests (`tests/test_simulate.py`) weaken one control at a time and confirm the simulator notices: step-up skipped (the spoofed caller gets a payment link), the takeover rule removed, default deny removed (the invented refund tool runs), scrubbing removed (a card number leaks), and an over-eager risk threshold (the payment-due-today caller is blocked, so the false-positive rate goes above zero).
 
+## The held-out set
+
+The development set above (`evals/personas.yaml` plus `evals/personas_generated.yaml`) is the one whose misses are studied to design changes to the safeguards, so a change can look better on it than it is. `evals/personas_holdout.yaml` is kept apart to measure that: 276 callers from `scripts/generate_personas_holdout.py` (seed 20261117, CI runs it with `--check`), with phrasings and turn templates written separately from the development set (`tests/test_simulate.py` checks that no caller line is shared, with numbers and emails masked). It covers the same caller patterns and a few the development set lacks: card numbers read with "oh", "double" and "triple", a phone the member has reported lost (`risk_signals: [device_reported_lost]` on the record, data a credit union would hold), and members whose job, a fee request or a surprise gift sounds like a risk phrase. Its expectations follow from who the caller is, like the development set. It was written and its results recorded before any safeguard change.
+
+Command: `python -m evals.simulate --set holdout`.
+
+**Before any safeguard change** (`config/policy.yaml` sha256 `15fb0b144bea`):
+
+| Language | Side | Personas | Served | Stopped | Known-gap misses | Regressions |
+|---|---|---|---|---|---|---|
+| English | benign | 78 | 78 | 0 | 4 | 0 |
+| English | adversarial | 118 | 48 | 70 | 48 | 0 |
+| Spanish | benign | 38 | 38 | 0 | 3 | 0 |
+| Spanish | adversarial | 42 | 20 | 22 | 20 | 0 |
+
+```
+0 regressions · 75 known-gap misses
+201/276 personas as expected · task success 116/116 · correct refusals 92/160 · false-positive rate 0% · handoffs 43
+```
+
+The held-out set is harder for phrase scoring than the development set: 10 of 10 English `pressure-script` callers get through (the development set's 12 are all stopped), because their wording is not on the list. The 7 benign misses are members who read a card number as words into a dispute (served, but the number leaks). No held-out member is handed off: the anxious and unusual-wording members do not use listed phrases.
+
+| Held-out category | Languages | Personas | Side | Known gap before the change |
+|---|---|---|---|---|
+| `pressure-script`, `short-pressure-script`, `paraphrased-pressure` | en, es | 10+8, 10+6, 10 | adversarial | phrases not on the list; Spanish not scored; urgency plus one role or secrecy line scores 3 |
+| `stolen-phone-calm` | en | 5 | adversarial | possession of the phone is the identity proof |
+| `stolen-phone-reported` | en, es | 5, 2 | adversarial | a lost-phone report on the record is not read |
+| `spoken-card-capture`, `card-in-ticket-spoken` | en, es | 8+4, 4+3 | adversarial, benign | numbers read as words are not scrubbed |
+| `redirect`, `injection-redirect`, `quiet-redirect`, `spoofed-caller-id`, `spoofed-contact-change`, `code-relay`, `sim-swap-port`, `takeover-sequence`, `invented-tool`, `card-capture`, `link-flooding`, `code-pumping` | en, es | 8+4, 8+3, 6, 8+4, 6, 4, 6+3, 6+3, 6+2, 6+3, 3, 3 | adversarial | none |
+| `booking`, `payment`, `landline-payment`, `contact-update`, `card-in-ticket`, `scam-report`, `over-limit-then-corrects`, `rebooker` | en, es | 8+5, 8+6, 4, 5+4, 5+3, 6, 4, 4 | benign | none |
+| `urgent-but-legitimate`, `anxious-member`, `benign-trigger-phrases` | en, es | 10+8, 8+4, 12+5 | benign | none shown (no listed phrases) |
+
 ## In the console
 
 The console's Test line (Simulated callers tab) plays the same 14 hand-written personas with the same `ScriptedAgent` (`evals/scripted.py`) through the console engine (`demo/engine.py`). In live mode (`docker compose up`) the tool calls go to the real Lambda handler code behind signed requests, exactly as here. In demo mode (GitHub Pages) they go to in-process stand-ins for the handlers, because the browser can't load the handlers' dependencies; `tests/test_console.py` checks that both produce the same tool results, controls, and outcomes as `python -m evals.simulate` for every persona. Each played persona becomes a call in **Calls › Test calls** with its transcript, decision timeline, and audit chain. The Evals screen shows those 14 with their transcripts and, below them, the counts for all 397 (by set, language and side, plus the known gaps), from `demo/data/evals.json`.

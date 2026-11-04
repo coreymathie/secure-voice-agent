@@ -27,10 +27,14 @@ jobs:
         run: python scripts/generate_sample_company.py --check
       - name: Generated simulated callers are current (evals/personas_generated.yaml)
         run: python scripts/generate_personas.py --check
+      - name: Held-out simulated callers are current (evals/personas_holdout.yaml)
+        run: python scripts/generate_personas_holdout.py --check
       - name: Call evals (scorecard in the job summary)
         run: python -m evals.run --json eval-results.json
-      - name: Simulated callers (scorecard in the job summary; fails on regressions, not on documented known gaps)
+      - name: Simulated callers, development set (scorecard in the job summary; fails on regressions, not on documented known gaps)
         run: python -m evals.simulate --json simulate-results.json
+      - name: Simulated callers, held-out set (scorecard in the job summary; fails on regressions, not on documented known gaps)
+        run: python -m evals.simulate --set holdout --json simulate-holdout-results.json
       - uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -38,6 +42,7 @@ jobs:
           path: |
             eval-results.json
             simulate-results.json
+            simulate-holdout-results.json
 
   console-smoke:
     # Drives every console screen in headless Chromium (scripts/demo_smoke.py): demo mode (Pyodide from the CDN)

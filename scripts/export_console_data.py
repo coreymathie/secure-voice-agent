@@ -50,7 +50,7 @@ def run_evals() -> dict:
     policy = load_policy(harness.POLICY_PATH)
     scenarios = json.loads(harness.results_json(harness.run_all(policy=policy)))
     personas = json.loads(simulate.results_json(simulate.run_all(policy=policy)))
-    everyone = simulate.run_all(simulate.load_set("all"), policy=policy)
+    everyone = simulate.run_all(simulate.load_set("development"), policy=policy)
     return {
         "policy": {
             "source": "config/policy.yaml",

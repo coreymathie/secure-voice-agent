@@ -49,7 +49,11 @@ def test_each_adversary_is_stopped_by_the_control_it_targets(results):
     assert "pii_scrubbed" in by_id["benign-card-in-ticket"].controls
 
 
-@pytest.mark.parametrize("path", [simulate.PERSONAS_PATH, simulate.GENERATED_PATH], ids=["handwritten", "generated"])
+@pytest.mark.parametrize(
+    "path",
+    [simulate.PERSONAS_PATH, simulate.GENERATED_PATH, simulate.HOLDOUT_PATH],
+    ids=["handwritten", "generated", "holdout"],
+)
 def test_personas_use_only_reserved_numbers_and_example_domains(path):
     """555-0100 to 555-0199 is reserved for fiction; members are in South Florida area codes."""
     text = path.read_text()
@@ -201,3 +205,70 @@ def test_breakdown_adds_up(generated):
     for r in rows:
         assert r["served"] + r["stopped"] == r["personas"]
         assert r["as_expected"] + r["known_gap_misses"] + r["regressions"] == r["personas"]
+
+
+# ---------- The held-out set (evals/personas_holdout.yaml) ----------
+
+
+@pytest.fixture(scope="module")
+def holdout():
+    personas = simulate.load_personas(simulate.HOLDOUT_PATH)
+    return personas, simulate.run_all(personas)
+
+
+def test_holdout_personas_are_current():
+    from scripts import generate_personas_holdout
+
+    assert simulate.HOLDOUT_PATH.read_text() == generate_personas_holdout.render()
+    assert generate_personas_holdout.main(["--check"]) == 0
+
+
+def test_holdout_is_separate_from_the_development_set(holdout):
+    """Its own seed, ids and phrasings: no caller line is shared with the development set, even with
+    numbers, amounts and emails masked."""
+    from scripts import generate_personas, generate_personas_holdout
+
+    assert generate_personas_holdout.SEED != generate_personas.SEED
+    personas, _ = holdout
+    assert all(p["id"].startswith("ho-") for p in personas)
+    assert simulate.load_set("development") and not {p["id"] for p in personas} & {
+        p["id"] for p in simulate.load_set("development")
+    }
+
+    def lines(ps):
+        mask = re.compile(r"[\w.+-]+@example\.com|\(\d{3}\) \d{3}-\d{4}|\d[\d,]*")
+        return {mask.sub("#", t["say"]).strip().lower() for p in ps for t in p["turns"] if t.get("say")}
+
+    shared = lines(personas) & lines(simulate.load_set("development"))
+    assert shared == set(), shared
+
+
+def test_holdout_personas_are_well_formed(holdout):
+    personas, _ = holdout
+    assert 200 <= len(personas) <= 400
+    assert {p["language"] for p in personas} == {"en", "es"}
+    for p in personas:
+        assert p["turns"] and p["goal"] and p["title"] and p["category"], p["id"]
+        assert p["expect"] == ("achieved" if p["kind"] in simulate.BENIGN_KINDS else "blocked"), p["id"]
+    sides = {(p["language"], p["kind"] in simulate.BENIGN_KINDS) for p in personas}
+    assert sides == {("en", True), ("en", False), ("es", True), ("es", False)}
+
+
+def test_holdout_has_no_regressions(holdout):
+    _, results = holdout
+    assert {r.id: r.failures for r in results if r.regression} == {}
+
+
+def test_holdout_known_gaps_are_documented_and_still_show(holdout):
+    _, results = holdout
+    doc = (simulate.PERSONAS_PATH.parents[1] / "docs" / "simulation.md").read_text()
+    for gap in simulate.known_gaps(results):
+        assert f"`{gap['category']}`" in doc, gap["category"]
+        assert gap["missed"] >= 1, gap
+
+
+def test_sets_load_by_name():
+    hand, gen, held = (len(simulate.load_set(n)) for n in ("handwritten", "generated", "holdout"))
+    assert len(simulate.load_set("development")) == hand + gen
+    assert len(simulate.load_set("all")) == hand + gen + held
+    assert {simulate.source_of(p["id"]) for p in simulate.load_set("all")} == {"handwritten", "generated", "holdout"}

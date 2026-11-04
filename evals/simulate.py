@@ -2,18 +2,22 @@
 """
 Simulated-caller harness: scripted multi-turn callers against the real tool stack.
 
-    python -m evals.simulate                       # all personas; exit 1 on a regression
+    python -m evals.simulate                       # the development set; exit 1 on a regression
+    python -m evals.simulate --set holdout         # the held-out set
     python -m evals.simulate --set handwritten     # only the 14 hand-written personas
     python -m evals.simulate --only se-owner-redirect benign-payer
     python -m evals.simulate --json sim.json --markdown sim.md --policy proposed.yaml
 
-Two persona files: evals/personas.yaml (14 hand-written callers, also played by
-the console) and evals/personas_generated.yaml (a larger seeded set written by
-scripts/generate_personas.py: reworded scam patterns, legitimate callers who
-sound urgent or unusual, and Spanish-language callers). A generated persona can
-carry `known_gap: <reason>`: it probes a documented limitation, its result is
-reported in its own section, and it does not fail the run. Any other persona
-that misses its expectation is a regression and the exit code is 1.
+Three persona files:
+  evals/personas.yaml            14 hand-written callers, also played by the console
+  evals/personas_generated.yaml  a larger seeded set (scripts/generate_personas.py): reworded scam
+                                 patterns, legitimate callers who sound urgent or unusual, Spanish callers
+  evals/personas_holdout.yaml    the held-out set (scripts/generate_personas_holdout.py): another seed and
+                                 separately written phrasings, kept out of the design of safeguard changes
+The development set (the default, `--set development`) is the first two; `--set all` adds the held-out
+set. A generated persona can carry `known_gap: <reason>`: it probes a documented limitation, its result
+is reported in its own section, and it does not fail the run. Any other persona that misses its
+expectation is a regression and the exit code is 1.
 
 Each persona is one phone call. Its turns are fed to the
 real policy gate as finalized caller transcript, and a deterministic scripted
@@ -86,7 +90,9 @@ from .scripted import (  # noqa: F401 - re-exported; scripted.py is shared with 
 
 PERSONAS_PATH = Path(__file__).with_name("personas.yaml")
 GENERATED_PATH = Path(__file__).with_name("personas_generated.yaml")
-SETS = ("all", "handwritten", "generated")
+HOLDOUT_PATH = Path(__file__).with_name("personas_holdout.yaml")
+SETS = ("development", "holdout", "all", "handwritten", "generated")
+SOURCES = {"gen-": "generated", "ho-": "holdout"}  # persona id prefix -> set; anything else is hand-written
 
 
 @dataclass
@@ -105,7 +111,7 @@ class PersonaResult:
     language: str = "en"
     category: str = ""  # generated personas: the caller pattern; hand-written: "handwritten"
     known_gap: str = ""  # a documented limitation this persona probes (does not fail the run)
-    source: str = "handwritten"  # handwritten | generated
+    source: str = "handwritten"  # handwritten | generated | holdout
 
     @property
     def regression(self) -> bool:
@@ -214,7 +220,7 @@ def run_persona(persona: dict, loaded: LoadedPolicy) -> PersonaResult:
         language=persona.get("language", "en"),
         category=persona.get("category", "handwritten"),
         known_gap=persona.get("known_gap", ""),
-        source="generated" if persona["id"].startswith("gen-") else "handwritten",
+        source=source_of(persona["id"]),
     )
 
 
@@ -223,13 +229,21 @@ def load_personas(path: Path = PERSONAS_PATH) -> list[dict]:
     return parse_personas(path.read_text())
 
 
-def load_set(which: str = "all") -> list[dict]:
-    """handwritten (evals/personas.yaml), generated (evals/personas_generated.yaml), or all of them."""
+def source_of(persona_id: str) -> str:
+    return next((name for prefix, name in SOURCES.items() if persona_id.startswith(prefix)), "handwritten")
+
+
+def load_set(which: str = "development") -> list[dict]:
+    """
+    development (hand-written + generated), holdout (evals/personas_holdout.yaml), all (both),
+    handwritten (evals/personas.yaml) or generated (evals/personas_generated.yaml).
+    """
     if which not in SETS:
         raise ValueError(f"unknown persona set {which!r}")
-    hand = load_personas(PERSONAS_PATH) if which in ("all", "handwritten") else []
-    gen = load_personas(GENERATED_PATH) if which in ("all", "generated") else []
-    personas = hand + gen
+    hand = load_personas(PERSONAS_PATH) if which in ("development", "all", "handwritten") else []
+    gen = load_personas(GENERATED_PATH) if which in ("development", "all", "generated") else []
+    held = load_personas(HOLDOUT_PATH) if which in ("holdout", "all") else []
+    personas = hand + gen + held
     ids = [p["id"] for p in personas]
     if len(ids) != len(set(ids)):
         raise ValueError("persona ids must be unique across both files")
@@ -264,7 +278,7 @@ def breakdown(results: list[PersonaResult]) -> list[dict]:
         row["as_expected"] += r.correct
         row["known_gap_misses"] += (not r.correct) and bool(r.known_gap)
         row["regressions"] += r.regression
-    order = {"handwritten": 0, "generated": 1, "en": 0, "es": 1, "benign": 0, "adversarial": 1}
+    order = {"handwritten": 0, "generated": 1, "holdout": 2, "en": 0, "es": 1, "benign": 0, "adversarial": 1}
     return sorted(rows.values(), key=lambda x: (order[x["set"]], order.get(x["language"], 9), order[x["side"]]))
 
 
@@ -310,7 +324,7 @@ def scorecard_markdown(results: list[PersonaResult], policy_ref: str = "") -> st
         "|---|---|---|---|---|---|",
     ]
     sm = summary(results)
-    if any(r.source == "generated" for r in results):
+    if any(r.source != "handwritten" for r in results):
         lines[2:2] = [
             f"**{len(sm['regressions'])} regressions** · {sm['known_gap_misses']} known-gap misses "
             "(documented limitations, reported below; they do not fail the run)",
@@ -324,7 +338,7 @@ def scorecard_markdown(results: list[PersonaResult], policy_ref: str = "") -> st
         controls = ", ".join(f"`{c}`" for c in r.controls) or "—"
         mark = "✅" if r.correct else ("⚠️" if r.known_gap else "❌")
         lines.append(f"| {mark} | {r.id} | {r.kind} | {goal} | {statuses} | {controls} |")
-    if any(r.source == "generated" for r in results):
+    if any(r.source != "handwritten" for r in results):
         lines += [
             "",
             "Generated personas are listed above only when they miss their expectation (⚠️ known gap, ❌ regression).",
@@ -397,7 +411,9 @@ def results_json(results: list[PersonaResult]) -> str:
 
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Simulated-caller harness (text-level)")
-    ap.add_argument("--set", choices=SETS, default="all", help="which persona files to run (default: all)")
+    ap.add_argument(
+        "--set", choices=SETS, default="development", help="which persona files to run (default: development)"
+    )
     ap.add_argument("--personas", type=Path, help="run this persona file instead of --set")
     ap.add_argument("--only", nargs="*", help="persona ids to run")
     ap.add_argument("--policy", type=Path, default=harness.POLICY_PATH)

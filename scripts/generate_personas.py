@@ -131,11 +131,13 @@ def spoken(e164: str) -> str:
 
 
 class Gen:
-    def __init__(self, seed: int = SEED) -> None:
+    def __init__(self, seed: int = SEED, prefix: str = "gen", first_number: int = 0) -> None:
         self.rng = random.Random(seed)
+        self.prefix = prefix  # persona ids start with it: gen- (this file), ho- (the held-out set)
         self.numbers = Numbers()
+        self.numbers.i = first_number
         self.targets = Numbers()
-        self.targets.i = 250  # redirect targets come from another part of the range than callers
+        self.targets.i = first_number + 250  # redirect targets come from another part of the range than callers
         self.out: list[dict] = []
         self.counts: dict[str, int] = {}
 
@@ -155,7 +157,7 @@ class Gen:
         n = self.counts.get((category, lang), 0) + 1
         self.counts[(category, lang)] = n
         p = {
-            "id": f"gen-{category}-{lang}-{n:02d}",
+            "id": f"{self.prefix}-{category}-{lang}-{n:02d}",
             "title": title,
             "kind": kind,
             "language": lang,
