@@ -14,7 +14,7 @@
   "industry": "Credit union (financial services)",
   "headquarters": "Fort Lauderdale, Florida",
   "members": 92400,
-  "assets_usd": 1400000000,
+  "assets_usd": 1600000000,
   "employees": 340,
   "branches": 11,
   "contact_center": "Member services, 38 agents, 8am-7pm ET Mon-Sat (closed Sunday); the AI agent answers 24/7",
@@ -25,98 +25,199 @@
   ]
  },
  "assumptions": {
-  "agent_cost_per_call_usd": 5.4,
-  "ai_cost_per_call_usd": 0.46,
-  "note": "Fully loaded member-services cost per handled call and AI cost per call (telephony, speech, model, compute). Illustrative assumptions for the sample company, not measurements."
+  "agent_cost_per_call_usd": 8.01,
+  "ai_cost_per_call_usd": 0.44,
+  "note": "Member-services cost per agent-handled call: Gartner's 2019 average cost per live-channel contact ($8.01), the lower of Gartner's two published figures. AI cost per call: OpenAI Realtime audio and Twilio toll-free voice and Media Streams list prices times the average call length; compute, storage and logging are not included. Set from published figures for the sample company, not measurements."
  },
  "benchmarks": [
   {
    "figure": "Calls answered by the agent",
    "value": "26,926 in 30 days (0.29 per member)",
-   "basis": "Volume model in generate_sample_company.py: about 1,020 calls on a typical weekday at the start of the period, a weekly shape, payday peaks and three events.",
+   "basis": "Volume model in generate_sample_company.py: about 1,020 calls on a typical weekday at the start of the period, a weekly shape, payday peaks and three events. No public figure for calls per credit union member was found.",
    "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "label": "Assumption (no public benchmark cited)",
+   "benchmark": null,
+   "sources": []
   },
   {
    "figure": "Resolved without a transfer",
    "value": "69.8%",
-   "basis": "Each intent's resolution rate in scripts/sample_calls.py, with a tuning gain of 10 points over the 90 days.",
-   "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "basis": "Each intent's resolution rate in scripts/sample_calls.py, with a tuning gain of 10 points over the 90 days. Compared with phone self-service (IVR) resolution in SQM Group's benchmarking.",
+   "status": "cited",
+   "label": "Calibrated to a published benchmark",
+   "benchmark": "63% one-contact resolution to 74% first-call resolution for IVR self-service",
+   "sources": [
+    {
+     "title": "IVR Dilemma - Customer Containment Vs. Customer Experience Focus?",
+     "publisher": "SQM Group",
+     "year": 2021,
+     "url": "https://www.sqmgroup.com/resources/library/blog/ivr-dilemma",
+     "quote": "Our research shows that the IVR self-service First Call Resolution (FCR) rate is 74%, which is the highest FCR rate of all contact channels. One Contact Resolution rate is 63% (OCR measures if the call was resolved in one call and one contact channel).",
+     "accessed": "2026-11-05"
+    }
+   ]
   },
   {
    "figure": "Average call length",
    "value": "1m 21s",
    "basis": "Scripted call timings in scripts/sample_calls.py: the disclosure, the consent prompt and each turn.",
    "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "label": "Assumption (no public benchmark cited)",
+   "benchmark": null,
+   "sources": []
   },
   {
    "figure": "Member satisfaction",
    "value": "4.25 / 5",
-   "basis": "Post-call survey ratings drawn per call outcome in scripts/sample_calls.py.",
+   "basis": "Post-call survey ratings drawn per call outcome in scripts/sample_calls.py. No public benchmark on a 1-5 scale was found.",
    "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "label": "Assumption (no public benchmark cited)",
+   "benchmark": null,
+   "sources": []
   },
   {
    "figure": "Member-services cost per agent-handled call",
-   "value": "$5.40",
-   "basis": "ASSUMPTIONS in generate_sample_company.py: fully loaded cost of a call handled by a member-services agent.",
-   "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "value": "$8.01",
+   "basis": "ASSUMPTIONS in generate_sample_company.py, set to Gartner's 2019 average cost per live-channel contact, the lower of the two Gartner figures (was $5.40, below both).",
+   "status": "cited",
+   "label": "Calibrated to a published benchmark",
+   "benchmark": "$8.01 (2019 average, live channels) to $13.50 (2024 median, assisted channels)",
+   "sources": [
+    {
+     "title": "Gartner Says Only 9% of Customers Report Solving Their Issues Completely via Self-Service",
+     "publisher": "Gartner (press release)",
+     "year": 2019,
+     "url": "https://www.gartner.com/en/newsroom/press-releases/2019-09-25-gartner-says-only-9--of-customers-report-solving-thei",
+     "quote": "Gartner\u2019s 2019 Customer Service and Support Leader poll identified that live channels such as phone, live chat and email cost an average of $8.01 per contact, while self-service channels such as company-run websites and mobile apps cost about $0.10 per contact.",
+     "accessed": "2026-11-05"
+    },
+    {
+     "title": "Benchmarks to Assess Your Customer Service Costs (public abstract)",
+     "publisher": "Gartner",
+     "year": 2024,
+     "url": "https://www.gartner.com/en/documents/5164231",
+     "quote": "The median cost per contact is $1.84 for self-service and $13.50 for assisted channels.",
+     "accessed": "2026-11-05"
+    }
+   ]
   },
   {
    "figure": "AI cost per call",
-   "value": "$0.46",
-   "basis": "ASSUMPTIONS in generate_sample_company.py: telephony, speech, model and compute for one AI-handled call.",
-   "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "value": "$0.44",
+   "basis": "AI_PRICE_PER_MINUTE_USD times the 30-day average call length: OpenAI Realtime audio at $0.06 a minute in and $0.24 a minute out, both billed for the whole call (an upper bound), plus Twilio toll-free inbound ($0.0220) and Media Streams ($0.0044). Compute, storage and logging are not included (was $0.46).",
+   "status": "cited",
+   "label": "Calibrated to a published benchmark",
+   "benchmark": "$0.3264 a minute in list prices",
+   "sources": [
+    {
+     "title": "Introducing the Realtime API",
+     "publisher": "OpenAI",
+     "year": 2024,
+     "url": "https://openai.com/index/introducing-the-realtime-api/",
+     "quote": "Audio input is priced at $100 per 1M tokens and output is $200 per 1M tokens. This equates to approximately $0.06 per minute of audio input and $0.24 per minute of audio output.",
+     "accessed": "2026-11-05"
+    },
+    {
+     "title": "Programmable Voice Pricing in United States",
+     "publisher": "Twilio (price list, current as of August 2026)",
+     "year": 2026,
+     "url": "https://www.twilio.com/en-us/voice/pricing/us",
+     "where": "Receive calls table",
+     "quote": "Toll-free numbers $0.0220/ min + $2.15 / mo",
+     "accessed": "2026-11-05"
+    },
+    {
+     "title": "Programmable Voice Pricing in United States",
+     "publisher": "Twilio (price list, current as of August 2026)",
+     "year": 2026,
+     "url": "https://www.twilio.com/en-us/voice/pricing/us",
+     "where": "Intelligent service pricing table",
+     "quote": "Media Streams Send a copy of a call's audio to a partner stream connector or to a secure websocket for real-processing. $0.0044/ min",
+     "accessed": "2026-11-05"
+    }
+   ]
   },
   {
    "figure": "Member-services cost avoided",
-   "value": "$93K",
+   "value": "$142K",
    "basis": "Calls resolved by the agent times the difference between the two per-call costs above.",
-   "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "status": "derived",
+   "label": "Derived from the rows above",
+   "benchmark": null,
+   "sources": []
   },
   {
    "figure": "Calls after hours",
    "value": "17.3% of calls",
    "basis": "Hourly call shape in scripts/sample_calls.py against member-services hours (8am-7pm Mon-Sat).",
    "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "label": "Assumption (no public benchmark cited)",
+   "benchmark": null,
+   "sources": []
   },
   {
    "figure": "Fraud attempts stopped",
    "value": "295 in 30 days",
    "basis": "Per-call rates in scripts/sample_calls.py (social engineering 0.45%, SIM swap 0.35%, account takeover 0.3%) plus one SIM-swap campaign.",
    "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "label": "Assumption (no public benchmark cited)",
+   "benchmark": null,
+   "sources": []
   },
   {
    "figure": "Assets per member",
-   "value": "$15,152",
-   "basis": "COMPANY in generate_sample_company.py: $1.4B in assets and 92,400 members.",
-   "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "value": "$17,316",
+   "basis": "COMPANY in generate_sample_company.py: $1.6B in assets and 92,400 members (assets were $1.4B, $15,152 per member, below both NCUA figures). NCUA: $2,498.9B over 146.1M members for all federally insured credit unions; $2,186.3B over 124.2M members for those over $500M in assets.",
+   "status": "cited",
+   "label": "Calibrated to a published benchmark",
+   "benchmark": "$17,104 (all federally insured credit unions) to $17,603 (assets over $500 million), June 30, 2026",
+   "sources": [
+    {
+     "title": "Quarterly Credit Union Data Summary 2026 Q2",
+     "publisher": "National Credit Union Administration (NCUA)",
+     "year": 2026,
+     "url": "https://ncua.gov/files/publications/analysis/quarterly-data-summary-2026-Q2.pdf",
+     "quote": "As of June 30, 2026, there were 4,214 federally insured credit unions with 146.1 million members.",
+     "accessed": "2026-11-05"
+    },
+    {
+     "title": "Quarterly Credit Union Data Summary 2026 Q2",
+     "publisher": "National Credit Union Administration (NCUA)",
+     "year": 2026,
+     "url": "https://ncua.gov/files/publications/analysis/quarterly-data-summary-2026-Q2.pdf",
+     "where": "Summary of Federally Insured Credit Union Call Report Data, Total assets, 2026.2",
+     "quote": "Total assets $ Billions 2,498.9",
+     "accessed": "2026-11-05"
+    },
+    {
+     "title": "Quarterly Credit Union Data Summary 2026 Q2",
+     "publisher": "National Credit Union Administration (NCUA)",
+     "year": 2026,
+     "url": "https://ncua.gov/files/publications/analysis/quarterly-data-summary-2026-Q2.pdf",
+     "where": "Summary of Credit Union Indicators by Type of Credit Union, Complex Credit Unions (Assets greater than $500 million)",
+     "quote": "Number of members (millions) 124.2; Total assets ($ billions) 2,186.3",
+     "accessed": "2026-11-05"
+    }
+   ]
   },
   {
    "figure": "Members per branch",
    "value": "8,400",
-   "basis": "COMPANY in generate_sample_company.py: 92,400 members and 11 branches.",
-   "status": "assumption",
-   "label": "Assumption (no published benchmark verified)",
-   "source": null
+   "basis": "COMPANY in generate_sample_company.py: 92,400 members and 11 branches. Inside the middle half for credit unions with $500 million or more in assets, as computed from NCUA call reports by a third-party site (not NCUA).",
+   "status": "cited",
+   "label": "Calibrated to a published benchmark",
+   "benchmark": "4,870 to 9,430 (middle half, median 6,584) for credit unions with $500 million or more in assets, Q2 2026",
+   "sources": [
+    {
+     "title": "Credit union members per branch",
+     "publisher": "Credit Union Ledger (creditunions.online), from NCUA 5300 Call Report data; not affiliated with NCUA",
+     "year": 2026,
+     "url": "https://creditunions.online/metrics/members-per-branch/",
+     "where": "By NCUA peer group table (Assets, Count, 25th pct, Median, 75th pct)",
+     "quote": "$500 million and up 758 4,870 6,584 9,430",
+     "accessed": "2026-11-05"
+    }
+   ]
   }
  ],
  "days": [

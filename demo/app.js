@@ -527,13 +527,16 @@ async function renderBusiness(view) {
 // "How these sample numbers were set": one row per headline figure, from demo/data/sample_company.json.
 function benchmarksHtml(rows) {
   if (!rows || !rows.length) return "";
-  const cited = rows.filter((r) => r.source).length;
-  const src = (r) => r.source
-    ? `<a href="${esc(r.source.url)}" rel="noopener">${esc(r.source.title)}</a>, ${esc(r.source.publisher)}, ${esc(r.source.year)}<span class="sub">“${esc(r.source.quote)}”</span>`
+  const cited = rows.filter((r) => r.status === "cited").length;
+  const derived = rows.filter((r) => r.status === "derived").length;
+  const one = (s) => `<span class="src"><a href="${esc(s.url)}" rel="noopener">${esc(s.title)}</a>, ${esc(s.publisher)}, ${esc(s.year)}${s.where ? ` (${esc(s.where)})` : ""}<span class="sub" translate="no">“${esc(s.quote)}”</span><span class="sub">Read ${esc(s.accessed)}</span></span>`;
+  const src = (r) => r.sources && r.sources.length
+    ? `<span class="sub"><b>Published:</b> <span translate="no">${esc(r.benchmark)}</span></span>${r.sources.map(one).join("")}`
     : `<span class="tag sample">${esc(r.label)}</span>`;
+  const summary = `${cited} of ${rows.length} figures are calibrated to a published source${derived ? `, ${derived} ${derived === 1 ? "is" : "are"} derived from them` : ""}, and ${rows.length - cited - derived} ${rows.length - cited - derived === 1 ? "is" : "are"} labelled as an assumption because no public benchmark was found.`;
   return `<section class="card" aria-labelledby="bench-h">
     <div class="card-head"><h2 id="bench-h">How these sample numbers were set</h2><span class="tag sample">sample</span></div>
-    <p class="hint">Every figure on this view is generated for a fictional credit union, not measured. Each row says what sets it in the generator<span class="tech-only"> (<code>scripts/generate_sample_company.py</code>, <code>scripts/sample_calls.py</code>)</span> and, where one has been verified, the published benchmark it is calibrated to. ${cited ? `${cited} of ${rows.length} figures cite a source.` : "No figure cites a published benchmark yet; each is labelled as an assumption."} Values are for the 30 days to the latest sample day.</p>
+    <p class="hint">Every figure on this view is generated for a fictional credit union, not measured. Each row says what sets it in the generator<span class="tech-only"> (<code>scripts/generate_sample_company.py</code>, <code>scripts/sample_calls.py</code>)</span> and, where one has been read and quoted, the published benchmark it is calibrated to. ${summary} Values are for the 30 days to the latest sample day.</p>
     <div class="table-wrap"><table id="bench-table"><thead><tr><th>Figure</th><th>In this sample</th><th class="hide-sm">What sets it</th><th>Source</th></tr></thead><tbody>
     ${rows.map((r) => `<tr><td class="wrap">${esc(r.figure)}</td><td class="nw" translate="no">${esc(r.value)}</td><td class="hide-sm wrap tiny">${esc(r.basis)}</td><td class="wrap tiny">${src(r)}</td></tr>`).join("")}
     </tbody></table></div></section>`;

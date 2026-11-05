@@ -256,6 +256,7 @@ tr.click:hover td, tr.click:focus-visible td { background: var(--surface); }
 tr.sel td { background: var(--amber-soft) !important; }
 tr.broken td { background: var(--warm-soft) !important; }
 td .sub { display: block; color: var(--ink-3); font-size: 12px; }
+td .src { display: block; margin-top: 6px; }
 td.wrap { overflow-wrap: break-word; word-break: normal; }
 .show-sm { display: none !important; }
 @media (max-width: 640px) { .hide-sm { display: none; } .show-sm { display: block !important; } }

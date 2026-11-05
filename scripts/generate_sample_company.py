@@ -27,7 +27,9 @@ The model, in short:
 - Member services is open 8am-7pm Monday to Saturday; the AI agent answers around the clock, so
   every Sunday call is after hours.
 - Fraud pressure is the call generator's background rate plus one SIM-swap campaign in late August.
-- Cost avoided uses stated per-call cost assumptions, which the Business view shows next to it.
+- Cost avoided uses per-call costs set from published figures (Gartner's cost per assisted contact; OpenAI
+  and Twilio list prices for the AI call), which the Business view shows next to it. BENCHMARKS below
+  lists every headline figure with its source, or labels it an assumption.
 - The recent-activity entries are written from the data: every number in them is computed here.
 
 It also writes demo/data/sample_calls.json: the 320 most recent calls on the last day.
@@ -75,18 +77,30 @@ COMPANY = {
     "industry": "Credit union (financial services)",
     "headquarters": "Fort Lauderdale, Florida",
     "members": 92400,
-    "assets_usd": 1_400_000_000,
+    "assets_usd": 1_600_000_000,
     "employees": 340,
     "branches": len(sample_calls.BRANCHES),
     "contact_center": "Member services, 38 agents, 8am-7pm ET Mon-Sat (closed Sunday); the AI agent answers 24/7",
     "regulators": ["NCUA", "CFPB", "Florida OFR"],
 }
 
+# Per-minute list prices behind the AI cost per call (see the "AI cost per call" row in BENCHMARKS): OpenAI
+# Realtime audio at its launch rates, billed here for the whole call as both input and output (an upper
+# bound), plus Twilio's charge to receive a call on a toll-free number and to stream its audio to the agent.
+AI_PRICE_PER_MINUTE_USD = {
+    "openai_audio_input": 0.06,
+    "openai_audio_output": 0.24,
+    "twilio_toll_free_inbound": 0.0220,
+    "twilio_media_streams": 0.0044,
+}
+
 ASSUMPTIONS = {
-    "agent_cost_per_call_usd": 5.40,
-    "ai_cost_per_call_usd": 0.46,
-    "note": "Fully loaded member-services cost per handled call and AI cost per call (telephony, speech, "
-    "model, compute). Illustrative assumptions for the sample company, not measurements.",
+    "agent_cost_per_call_usd": 8.01,
+    "ai_cost_per_call_usd": 0.44,
+    "note": "Member-services cost per agent-handled call: Gartner's 2019 average cost per live-channel contact "
+    "($8.01), the lower of Gartner's two published figures. AI cost per call: OpenAI Realtime audio and Twilio "
+    "toll-free voice and Media Streams list prices times the average call length; compute, storage and logging "
+    "are not included. Set from published figures for the sample company, not measurements.",
 }
 
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
@@ -94,32 +108,92 @@ WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", 
 # ---------- how the sample numbers were set ----------
 #
 # One row per headline figure on the Sample business view: the value in this sample (the 30 days to the
-# latest sample day), what sets it, and the published benchmark it is calibrated to. A row may cite a
-# source only if the page was fetched and read and `quote` is the sentence the figure comes from; then
-# it needs title, publisher, year, url and quote (tests/test_sample_company.py checks this). A row with
-# no source is labelled an assumption. The console's "How these sample numbers were set" panel and the
-# table in docs/console.md both come from this list (through demo/data/sample_company.json).
+# latest sample day), what sets it, and the published benchmark it is calibrated to. A row may list
+# `sources` only if each page was fetched and read and `quote` is the text the figure comes from; each
+# source then needs title, publisher, year, url and quote, and the sample value must sit inside `range`
+# (tests/test_sample_company.py checks this). A row with no sources is labelled derived (computed from
+# other rows) or an assumption. The console's "How these sample numbers were set" panel and the table in
+# docs/console.md both come from this list (through demo/data/sample_company.json).
 
-UNVERIFIED = "Assumption (no published benchmark verified)"
+UNVERIFIED = "Assumption (no public benchmark cited)"
+DERIVED = "Derived from the rows above"
+ACCESSED = "2026-11-05"
+
+_NCUA = {
+    "title": "Quarterly Credit Union Data Summary 2026 Q2",
+    "publisher": "National Credit Union Administration (NCUA)",
+    "year": 2026,
+    "url": "https://ncua.gov/files/publications/analysis/quarterly-data-summary-2026-Q2.pdf",
+}
+_GARTNER_2019 = {
+    "title": "Gartner Says Only 9% of Customers Report Solving Their Issues Completely via Self-Service",
+    "publisher": "Gartner (press release)",
+    "year": 2019,
+    "url": "https://www.gartner.com/en/newsroom/press-releases/2019-09-25-gartner-says-only-9--of-customers-report-solving-thei",
+}
+_TWILIO = {
+    "title": "Programmable Voice Pricing in United States",
+    "publisher": "Twilio (price list, current as of August 2026)",
+    "year": 2026,
+    "url": "https://www.twilio.com/en-us/voice/pricing/us",
+}
+
+# A row with `sources` is calibrated: the sample value sits in `range` (low, high) where one is given, and every
+# source carries the page's exact words in `quote` (`where` names the table, for figures read from a table).
 BENCHMARKS = [
     {"figure": "Calls answered by the agent", "key": "calls",
      "basis": "Volume model in generate_sample_company.py: about 1,020 calls on a typical weekday at the "
               "start of the period, "
-              "a weekly shape, payday peaks and three events."},
+              "a weekly shape, payday peaks and three events. No public figure for calls per credit union "
+              "member was found."},
     {"figure": "Resolved without a transfer", "key": "containment",
      "basis": "Each intent's resolution rate in scripts/sample_calls.py, with a tuning gain of 10 points over "
-              "the 90 days."},
+              "the 90 days. Compared with phone self-service (IVR) resolution in SQM Group's benchmarking.",
+     "benchmark": "63% one-contact resolution to 74% first-call resolution for IVR self-service",
+     "range": (63.0, 74.0),
+     "sources": [
+         {"title": "IVR Dilemma - Customer Containment Vs. Customer Experience Focus?", "publisher": "SQM Group",
+          "year": 2021, "url": "https://www.sqmgroup.com/resources/library/blog/ivr-dilemma",
+          "quote": "Our research shows that the IVR self-service First Call Resolution (FCR) rate is 74%, which is "
+                   "the highest FCR rate of all contact channels. One Contact Resolution rate is 63% (OCR measures "
+                   "if the call was resolved in one call and one contact channel)."},
+     ]},
     {"figure": "Average call length", "key": "avg_handle",
      "basis": "Scripted call timings in scripts/sample_calls.py: the disclosure, the consent prompt and each turn."},
     {"figure": "Member satisfaction", "key": "csat",
-     "basis": "Post-call survey ratings drawn per call outcome in scripts/sample_calls.py."},
+     "basis": "Post-call survey ratings drawn per call outcome in scripts/sample_calls.py. No public benchmark "
+              "on a 1-5 scale was found."},
     {"figure": "Member-services cost per agent-handled call", "key": "agent_cost",
-     "basis": "ASSUMPTIONS in generate_sample_company.py: fully loaded cost of a call handled by a "
-              "member-services agent."},
+     "basis": "ASSUMPTIONS in generate_sample_company.py, set to Gartner's 2019 average cost per live-channel "
+              "contact, the lower of the two Gartner figures (was $5.40, below both).",
+     "benchmark": "$8.01 (2019 average, live channels) to $13.50 (2024 median, assisted channels)",
+     "range": (8.01, 13.50),
+     "sources": [
+         {**_GARTNER_2019,
+          "quote": "Gartner\u2019s 2019 Customer Service and Support Leader poll identified that live channels such "
+                   "as phone, live chat and email cost an average of $8.01 per contact, while self-service "
+                   "channels such as company-run websites and mobile apps cost about $0.10 per contact."},
+         {"title": "Benchmarks to Assess Your Customer Service Costs (public abstract)", "publisher": "Gartner",
+          "year": 2024, "url": "https://www.gartner.com/en/documents/5164231",
+          "quote": "The median cost per contact is $1.84 for self-service and $13.50 for assisted channels."},
+     ]},
     {"figure": "AI cost per call", "key": "ai_cost",
-     "basis": "ASSUMPTIONS in generate_sample_company.py: telephony, speech, model and compute for one "
-              "AI-handled call."},
-    {"figure": "Member-services cost avoided", "key": "cost_avoided",
+     "basis": "AI_PRICE_PER_MINUTE_USD times the 30-day average call length: OpenAI Realtime audio at $0.06 a "
+              "minute in and $0.24 a minute out, both billed for the whole call (an upper bound), plus Twilio "
+              "toll-free inbound ($0.0220) and Media Streams ($0.0044). Compute, storage and logging are not "
+              "included (was $0.46).",
+     "benchmark": "$0.3264 a minute in list prices",
+     "sources": [
+         {"title": "Introducing the Realtime API", "publisher": "OpenAI", "year": 2024,
+          "url": "https://openai.com/index/introducing-the-realtime-api/",
+          "quote": "Audio input is priced at $100 per 1M tokens and output is $200 per 1M tokens. This equates to "
+                   "approximately $0.06 per minute of audio input and $0.24 per minute of audio output."},
+         {**_TWILIO, "where": "Receive calls table", "quote": "Toll-free numbers $0.0220/ min + $2.15 / mo"},
+         {**_TWILIO, "where": "Intelligent service pricing table",
+          "quote": "Media Streams Send a copy of a call's audio to a partner stream connector or to a secure "
+                   "websocket for real-processing. $0.0044/ min"},
+     ]},
+    {"figure": "Member-services cost avoided", "key": "cost_avoided", "derived": True,
      "basis": "Calls resolved by the agent times the difference between the two per-call costs above."},
     {"figure": "Calls after hours", "key": "after_hours",
      "basis": "Hourly call shape in scripts/sample_calls.py against member-services hours (8am-7pm Mon-Sat)."},
@@ -127,9 +201,34 @@ BENCHMARKS = [
      "basis": "Per-call rates in scripts/sample_calls.py (social engineering 0.45%, SIM swap 0.35%, account "
               "takeover 0.3%) plus one SIM-swap campaign."},
     {"figure": "Assets per member", "key": "assets_per_member",
-     "basis": "COMPANY in generate_sample_company.py: $1.4B in assets and 92,400 members."},
+     "basis": "COMPANY in generate_sample_company.py: $1.6B in assets and 92,400 members (assets were $1.4B, "
+              "$15,152 per member, below both NCUA figures). NCUA: $2,498.9B over 146.1M members for all "
+              "federally insured credit unions; $2,186.3B over 124.2M members for those over $500M in assets.",
+     "benchmark": "$17,104 (all federally insured credit unions) to $17,603 (assets over $500 million), June 30, 2026",
+     "range": (17104, 17603),
+     "sources": [
+         {**_NCUA,
+          "quote": "As of June 30, 2026, there were 4,214 federally insured credit unions with 146.1 million members."},
+         {**_NCUA, "where": "Summary of Federally Insured Credit Union Call Report Data, Total assets, 2026.2",
+          "quote": "Total assets $ Billions 2,498.9"},
+         {**_NCUA, "where": "Summary of Credit Union Indicators by Type of Credit Union, Complex Credit Unions "
+                            "(Assets greater than $500 million)",
+          "quote": "Number of members (millions) 124.2; Total assets ($ billions) 2,186.3"},
+     ]},
     {"figure": "Members per branch", "key": "members_per_branch",
-     "basis": "COMPANY in generate_sample_company.py: 92,400 members and 11 branches."},
+     "basis": "COMPANY in generate_sample_company.py: 92,400 members and 11 branches. Inside the middle half for "
+              "credit unions with $500 million or more in assets, as computed from NCUA call reports by a "
+              "third-party site (not NCUA).",
+     "benchmark": "4,870 to 9,430 (middle half, median 6,584) for credit unions with $500 million or more in "
+                  "assets, Q2 2026",
+     "range": (4870, 9430),
+     "sources": [
+         {"title": "Credit union members per branch", "publisher": "Credit Union Ledger (creditunions.online), from "
+          "NCUA 5300 Call Report data; not affiliated with NCUA", "year": 2026,
+          "url": "https://creditunions.online/metrics/members-per-branch/",
+          "where": "By NCUA peer group table (Assets, Count, 25th pct, Median, 75th pct)",
+          "quote": "$500 million and up 758 4,870 6,584 9,430"},
+     ]},
 ]  # fmt: skip
 
 
@@ -219,7 +318,7 @@ def _last_day_row(rng: random.Random, full: list[dict]) -> dict:
 
 
 def _money_short(n: float) -> str:
-    """The console's dashboard format (demo/format.js moneyShort): $1.4B, $1.46M, $93K."""
+    """The console's dashboard format (demo/format.js moneyShort): $1.6B, $1.46M, $142K."""
     if n >= 1e9:
         return f"${n / 1e9:.1f}B".replace(".0B", "B")
     if n >= 1e6:
@@ -230,49 +329,78 @@ def _money_short(n: float) -> str:
     return f"${round(n):,}"
 
 
-def benchmark_rows(days: list[dict]) -> list[dict]:
-    """BENCHMARKS with each figure's value over the last 30 days, and its source or its assumption label."""
+def ai_cost_per_call(days: list[dict]) -> float:
+    """AI_PRICE_PER_MINUTE_USD times the average call length over the last 30 days, to the cent."""
+    last = days[-30:]
+    minutes = sum(d["avg_handle_seconds"] * d["calls"] for d in last) / sum(d["calls"] for d in last) / 60
+    return round(minutes * sum(AI_PRICE_PER_MINUTE_USD.values()), 2)
+
+
+def benchmark_values(days: list[dict]) -> dict[str, tuple[str, float]]:
+    """Each headline figure over the last 30 days: (as shown, as a number comparable with the row's range)."""
     last = days[-30:]
     calls = sum(d["calls"] for d in last)
     contained = sum(d["contained"] for d in last)
     handle = sum(d["avg_handle_seconds"] * d["calls"] for d in last) / calls
+    csat = sum(d["csat"] * d["calls"] for d in last) / calls
+    after = sum(d["after_hours"] for d in last) / calls * 100
+    fraud = sum(d["fraud_blocked"] for d in last)
     a = ASSUMPTIONS
-    values = {
-        "calls": f"{calls:,} in 30 days ({calls / COMPANY['members']:.2f} per member)",
-        "containment": f"{contained / calls * 100:.1f}%",
-        "avg_handle": f"{int(handle // 60)}m {round(handle % 60):02d}s",
-        "csat": f"{sum(d['csat'] * d['calls'] for d in last) / calls:.2f} / 5",
-        "agent_cost": f"${a['agent_cost_per_call_usd']:.2f}",
-        "ai_cost": f"${a['ai_cost_per_call_usd']:.2f}",
-        "cost_avoided": _money_short(contained * (a["agent_cost_per_call_usd"] - a["ai_cost_per_call_usd"])),
-        "after_hours": f"{sum(d['after_hours'] for d in last) / calls * 100:.1f}% of calls",
-        "fraud": f"{sum(d['fraud_blocked'] for d in last):,} in 30 days",
-        "assets_per_member": f"${COMPANY['assets_usd'] / COMPANY['members']:,.0f}",
-        "members_per_branch": f"{COMPANY['members'] / COMPANY['branches']:,.0f}",
+    avoided = contained * (a["agent_cost_per_call_usd"] - a["ai_cost_per_call_usd"])
+    per_member = COMPANY["assets_usd"] / COMPANY["members"]
+    per_branch = COMPANY["members"] / COMPANY["branches"]
+    return {
+        "calls": (f"{calls:,} in 30 days ({calls / COMPANY['members']:.2f} per member)", calls),
+        "containment": (f"{contained / calls * 100:.1f}%", contained / calls * 100),
+        "avg_handle": (f"{int(handle // 60)}m {round(handle % 60):02d}s", handle),
+        "csat": (f"{csat:.2f} / 5", csat),
+        "agent_cost": (f"${a['agent_cost_per_call_usd']:.2f}", a["agent_cost_per_call_usd"]),
+        "ai_cost": (f"${a['ai_cost_per_call_usd']:.2f}", a["ai_cost_per_call_usd"]),
+        "cost_avoided": (_money_short(avoided), avoided),
+        "after_hours": (f"{after:.1f}% of calls", after),
+        "fraud": (f"{fraud:,} in 30 days", fraud),
+        "assets_per_member": (f"${per_member:,.0f}", per_member),
+        "members_per_branch": (f"{per_branch:,.0f}", per_branch),
     }
+
+
+def benchmark_rows(days: list[dict]) -> list[dict]:
+    """BENCHMARKS with each figure's value over the last 30 days, and its sources or its assumption label."""
+    values = benchmark_values(days)
     rows = []
     for b in BENCHMARKS:
-        source = b.get("source")
+        sources = [{**s, "accessed": ACCESSED} for s in b.get("sources", [])]
+        status = "cited" if sources else "derived" if b.get("derived") else "assumption"
+        label = {"cited": "Calibrated to a published benchmark", "derived": DERIVED, "assumption": UNVERIFIED}
         rows.append(
             {
                 "figure": b["figure"],
-                "value": values[b["key"]],
+                "value": values[b["key"]][0],
                 "basis": b["basis"],
-                "status": "cited" if source else "assumption",
-                "label": "Calibrated to a published benchmark" if source else UNVERIFIED,
-                "source": source,
+                "status": status,
+                "label": label[status],
+                "benchmark": b.get("benchmark"),
+                "sources": sources,
             }
         )
     return rows
 
 
 def benchmarks_markdown(rows: list[dict]) -> str:
-    """The table in docs/console.md, between its benchmarks:start and benchmarks:end markers."""
-    lines = ["| Figure | In this sample (30 days) | What sets it | Source |", "|---|---|---|---|"]
+    """The table and quoted sources in docs/console.md, between its benchmarks:start and benchmarks:end markers."""
+    lines = [
+        "| Figure | In this sample (30 days) | What sets it | Published benchmark | Source |",
+        "|---|---|---|---|---|",
+    ]
+    quotes = []
     for r in rows:
-        src = r["source"]
-        cell = f"[{src['title']}]({src['url']}), {src['publisher']}, {src['year']}" if src else r["label"]
-        lines.append(f"| {r['figure']} | {r['value']} | {r['basis']} | {cell} |")
+        refs = {s["url"]: f"[{s['title']}]({s['url']}), {s['publisher']}, {s['year']}" for s in r["sources"]}
+        for s in r["sources"]:
+            where = f" ({s['where']})" if s.get("where") else ""
+            quotes.append(f'- **{r["figure"]}**, {s["title"]}{where}: "{s["quote"]}"')
+        cell = "; ".join(refs.values()) or r["label"]
+        lines.append(f"| {r['figure']} | {r['value']} | {r['basis']} | {r['benchmark'] or '-'} | {cell} |")
+    lines += ["", f"Quoted text, exactly as on each page (all read on {ACCESSED}):", "", *quotes]
     return "\n".join(lines)
 
 
