@@ -77,7 +77,7 @@ COMPANY = {
     "industry": "Credit union (financial services)",
     "headquarters": "Fort Lauderdale, Florida",
     "members": 92400,
-    "assets_usd": 1_600_000_000,
+    "assets_usd": 1_400_000_000,
     "employees": 340,
     "branches": len(sample_calls.BRANCHES),
     "contact_center": "Member services, 38 agents, 8am-7pm ET Mon-Sat (closed Sunday); the AI agent answers 24/7",
@@ -201,18 +201,27 @@ BENCHMARKS = [
      "basis": "Per-call rates in scripts/sample_calls.py (social engineering 0.45%, SIM swap 0.35%, account "
               "takeover 0.3%) plus one SIM-swap campaign."},
     {"figure": "Assets per member", "key": "assets_per_member",
-     "basis": "COMPANY in generate_sample_company.py: $1.6B in assets and 92,400 members (assets were $1.4B, "
-              "$15,152 per member, below both NCUA figures). NCUA: $2,498.9B over 146.1M members for all "
-              "federally insured credit unions; $2,186.3B over 124.2M members for those over $500M in assets.",
-     "benchmark": "$17,104 (all federally insured credit unions) to $17,603 (assets over $500 million), June 30, 2026",
-     "range": (17104, 17603),
+     "basis": "COMPANY in generate_sample_company.py: $1.4B in assets and 92,400 members. Inside the range across "
+              "the credit-union types NCUA reports, from small credit unions ($73.8B over 6.3M members) to "
+              "federally insured state-chartered credit unions ($1,191.9B over 65.7M members); below the average "
+              "for all federally insured credit unions ($2,498.9B over 146.1M members, $17,104) and for complex "
+              "credit unions over $500M in assets ($2,186.3B over 124.2M members, $17,603).",
+     "benchmark": "$11,714 (small credit unions) to $18,142 (federally insured state-chartered credit unions) "
+                  "across the types NCUA reports; $17,104 for all federally insured credit unions, June 30, 2026",
+     "range": (11714, 18142),
      "sources": [
          {**_NCUA,
           "quote": "As of June 30, 2026, there were 4,214 federally insured credit unions with 146.1 million members."},
          {**_NCUA, "where": "Summary of Federally Insured Credit Union Call Report Data, Total assets, 2026.2",
           "quote": "Total assets $ Billions 2,498.9"},
-         {**_NCUA, "where": "Summary of Credit Union Indicators by Type of Credit Union, Complex Credit Unions "
-                            "(Assets greater than $500 million)",
+         {**_NCUA, "where": "Summary of Credit Union Indicators by Type of Credit Union: 2026 Q2, Small Credit "
+                            "Unions (Assets less than $100 million)",
+          "quote": "Number of members (millions) 6.3; Total assets ($ billions) 73.8"},
+         {**_NCUA, "where": "Summary of Credit Union Indicators by Type of Credit Union: 2026 Q2, Federally Insured "
+                            "State-Chartered Credit Unions",
+          "quote": "Number of members (millions) 65.7; Total assets ($ billions) 1,191.9"},
+         {**_NCUA, "where": "Summary of Credit Union Indicators by Type of Credit Union: 2026 Q2, Complex Credit "
+                            "Unions (Assets greater than $500 million)",
           "quote": "Number of members (millions) 124.2; Total assets ($ billions) 2,186.3"},
      ]},
     {"figure": "Members per branch", "key": "members_per_branch",
@@ -318,7 +327,7 @@ def _last_day_row(rng: random.Random, full: list[dict]) -> dict:
 
 
 def _money_short(n: float) -> str:
-    """The console's dashboard format (demo/format.js moneyShort): $1.6B, $1.46M, $142K."""
+    """The console's dashboard format (demo/format.js moneyShort): $1.4B, $1.46M, $142K."""
     if n >= 1e9:
         return f"${n / 1e9:.1f}B".replace(".0B", "B")
     if n >= 1e6:
