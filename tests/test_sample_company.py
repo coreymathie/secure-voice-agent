@@ -84,18 +84,53 @@ def test_every_headline_figure_has_a_benchmark_row():
     figures = [b["figure"] for b in data["benchmarks"]]
     assert len(figures) == len(set(figures)) == len(gen.BENCHMARKS) >= 10
     for b in data["benchmarks"]:
-        assert b["value"] and b["basis"] and b["status"] in ("cited", "assumption"), b
+        assert b["value"] and b["basis"] and b["status"] in ("cited", "derived", "assumption"), b
 
 
-def test_every_cited_figure_has_a_url_and_the_quoted_sentence():
-    """A row may cite a source only with its title, publisher, year, URL and the sentence the figure comes from."""
-    for b in gen.build()["benchmarks"]:
+def test_every_cited_figure_has_a_url_and_the_quoted_text():
+    """A cited row needs title, publisher, year, URL, access date and the text the figure comes from, per source."""
+    rows = gen.build()["benchmarks"]
+    assert sum(b["status"] == "cited" for b in rows) >= 1
+    for b in rows:
         if b["status"] == "cited":
-            src = b["source"]
-            assert src["url"].startswith("https://"), b["figure"]
-            assert src["title"] and src["publisher"] and str(src["year"]).isdigit() and src["quote"], b["figure"]
+            assert b["benchmark"] and b["sources"], b["figure"]
+            for src in b["sources"]:
+                assert src["url"].startswith("https://"), b["figure"]
+                assert src["title"] and src["publisher"] and str(src["year"]).isdigit() and src["quote"], b["figure"]
+                assert src["accessed"] == gen.ACCESSED
         else:
-            assert b["source"] is None and b["label"] == gen.UNVERIFIED, b["figure"]
+            assert b["sources"] == [] and b["benchmark"] is None, b["figure"]
+            assert b["label"] == (gen.DERIVED if b["status"] == "derived" else gen.UNVERIFIED), b["figure"]
+
+
+def test_cited_values_sit_inside_their_published_range():
+    values = gen.benchmark_values(gen.build()["days"])
+    ranged = [b for b in gen.BENCHMARKS if "range" in b]
+    assert ranged
+    for b in ranged:
+        assert b.get("sources"), b["figure"]
+        low, high = b["range"]
+        assert low <= values[b["key"]][1] <= high, (b["figure"], values[b["key"]], b["range"])
+
+
+def test_ai_cost_per_call_matches_the_list_prices():
+    days = gen.build()["days"]
+    assert gen.ASSUMPTIONS["ai_cost_per_call_usd"] == gen.ai_cost_per_call(days)
+    assert round(sum(gen.AI_PRICE_PER_MINUTE_USD.values()), 4) == 0.3264
+    ai = next(b for b in gen.BENCHMARKS if b["key"] == "ai_cost")
+    quoted = " ".join(s["quote"] for s in ai["sources"])
+    prices = ("$0.06 per minute of audio input", "$0.24 per minute of audio output", "$0.0220/ min", "$0.0044/ min")
+    for price in prices:
+        assert price in quoted
+
+
+def test_cost_figures_match_the_cited_sources():
+    a = gen.ASSUMPTIONS
+    agent = next(b for b in gen.BENCHMARKS if b["key"] == "agent_cost")
+    assert f"${a['agent_cost_per_call_usd']:.2f}" in agent["sources"][0]["quote"]
+    company = gen.build()["company"]
+    assets = next(b for b in gen.BENCHMARKS if b["key"] == "assets_per_member")
+    assert f"${company['assets_usd'] / 1e9:.1f}B" in assets["basis"]
 
 
 def test_docs_table_matches_the_data():

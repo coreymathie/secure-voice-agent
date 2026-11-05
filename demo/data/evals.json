@@ -1,5 +1,5 @@
 {
- "generated_at": "2026-11-04",
+ "generated_at": "2026-11-05",
  "version": "0.7.0",
  "note": "Measured by scripts/export_console_data.py from this repo's own eval scripts and tests. Text-level only: no audio, no language model, outside services faked.",
  "policy": {
@@ -2016,8 +2016,8 @@
  },
  "pytest": {
   "command": "pytest -q",
-  "total": 518,
-  "passed": 518,
+  "total": 521,
+  "passed": 521,
   "failed": 0,
   "skipped": 0
  },

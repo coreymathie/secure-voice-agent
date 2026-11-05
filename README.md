@@ -15,7 +15,7 @@
 | **Architecture** | Twilio → one long-lived Pipecat worker per call (Fly.io or ECS) → safeguard layer → HMAC-signed, idempotent tool handlers on AWS Lambda + DynamoDB. |
 | **Key decisions** | Safeguards in code, not prompts or a judge model; provider-independent (speech-to-speech default, cascaded as a swap); payment links pinned to the calling number. [4 ADRs](#key-decisions-and-trade-offs). |
 | **Controls** | Default-deny allow-list, social-engineering scoring, step-up verification to the phone on file, per-call caps, velocity limits, identifier scrubbing, hash-chained audit, idempotency, signed requests. Policy as code in [`config/policy.yaml`](config/policy.yaml). |
-| **Evidence** | 518 pytest tests, including 22 mutation tests that each switch off or weaken one safeguard and confirm the evals or the simulator fail; 31/31 call evals; simulated callers in English and Spanish, scripted and text-level, not a measured rate on real calls: a 397-caller development set (145/155 benign served, 235/242 adversarial stopped) and a 276-caller held-out set written separately and not used to tune the code (112/116 benign served, 123/160 adversarial stopped); a 171-check browser smoke test of the console. |
+| **Evidence** | 521 pytest tests, including 22 mutation tests that each switch off or weaken one safeguard and confirm the evals or the simulator fail; 31/31 call evals; simulated callers in English and Spanish, scripted and text-level, not a measured rate on real calls: a 397-caller development set (145/155 benign served, 235/242 adversarial stopped) and a 276-caller held-out set written separately and not used to tune the code (112/116 benign served, 123/160 adversarial stopped); a 171-check browser smoke test of the console. |
 | **Out of scope** | No latency or cost figures are published (none have been measured here); no live model or synthetic speech drives the evals; Twilio `<Pay>`, Twilio Verify and SIM-swap data sources are not exercised; nothing here is a compliance certification. |
 | **Try it** | [Live console](https://coreymathie.github.io/secure-voice-agent/demo/): opens on the evals measured on the real code; the interactive screens run the repo's real safeguard code in the browser through Pyodide. No backend, no keys. |
 
@@ -25,7 +25,7 @@
 
 [![The Secure Voice Agent console opening on Evals: the 31 call evals and the mutation tests, measured on the repository's code](docs/img/console.png)](https://coreymathie.github.io/secure-voice-agent/demo/)
 
-The console opens on **Evals**: the call evals, mutation tests and simulated callers, measured on this repository's code. It is laid out as the operating view a credit union's contact-center team would use: a sample business view, a searchable call history with the safeguards that stepped in on each call, a test line to try to fool the agent, and the governing policy. Its interactive screens run this repository's real `make_handler()`, `src/safeguards/` and `config/policy.yaml` loader in the browser through Pyodide; outside services are simulated and labelled as such, and no language model is involved. The workspace is **Cypress Harbor Credit Union**, a *fictional* credit union; its data is a labelled **sample** (a "How these sample numbers were set" panel says what sets each headline figure; none is calibrated to a published benchmark yet, so each is labelled an assumption), eval results are labelled **measured**, and calls placed from the test line are kept apart as test calls. Screens, modes, the live-mode API and the sample data are described in [`docs/console.md`](docs/console.md).
+The console opens on **Evals**: the call evals, mutation tests and simulated callers, measured on this repository's code. It is laid out as the operating view a credit union's contact-center team would use: a sample business view, a searchable call history with the safeguards that stepped in on each call, a test line to try to fool the agent, and the governing policy. Its interactive screens run this repository's real `make_handler()`, `src/safeguards/` and `config/policy.yaml` loader in the browser through Pyodide; outside services are simulated and labelled as such, and no language model is involved. The workspace is **Cypress Harbor Credit Union**, a *fictional* credit union; its data is a labelled **sample** (a "How these sample numbers were set" panel says what sets each headline figure: five are calibrated to published figures from NCUA, Gartner, SQM Group, OpenAI and Twilio, quoted with their links, one is derived from them, and five are labelled assumptions because no public benchmark was found), eval results are labelled **measured**, and calls placed from the test line are kept apart as test calls. Screens, modes, the live-mode API and the sample data are described in [`docs/console.md`](docs/console.md).
 
 ## Problem and context
 
@@ -156,7 +156,7 @@ How each control behaves, with its defaults, is in [`docs/controls.md`](docs/con
 
 | Evidence | Result | How it is produced | Label |
 |---|---|---|---|
-| Unit and integration tests | 518 tests (10 are skipped if fakeredis is not installed) | `pytest -q` | measured |
+| Unit and integration tests | 521 tests (10 are skipped if fakeredis is not installed) | `pytest -q` | measured |
 | Call evals | 31/31 scenarios | `python -m evals.run`, through the real stack | measured |
 | Mutation tests | 22 | Part of the pytest suite: 17 in `tests/test_evals.py` switch off or weaken one safeguard and confirm the call evals fail; 5 in `tests/test_simulate.py` do the same for the simulator. 2 of the 22 lower the risk threshold to 1 and confirm a benign caller being blocked is caught. Not counted: 2 tests that a wrong expectation fails, and the tests that run every scenario | measured |
 | Simulated callers, development set | 397 personas (14 hand-written, 383 from a seeded generator; English and Spanish): 145/155 benign and impatient callers served, 235/242 adversarial callers stopped, 10 benign callers handed off; 0 regressions, 17 misses in documented known-gap categories | `python -m evals.simulate`, a scripted agent | simulated |
@@ -257,7 +257,7 @@ Demo mode: `python -m http.server 8000` from the repository root, then open http
 ### Run the checks
 
 ```bash
-ruff check . && ruff format --check . && pytest -q   # 518 tests (10 are skipped if fakeredis is not installed)
+ruff check . && ruff format --check . && pytest -q   # 521 tests (10 are skipped if fakeredis is not installed)
 python -m src.safeguards.policy_config config/policy.yaml   # validate the policy file
 python scripts/generate_personas.py --check           # the generated callers match the seeded generator
 python scripts/generate_personas_holdout.py --check   # the held-out callers match their generator

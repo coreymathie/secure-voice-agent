@@ -218,9 +218,16 @@ def demo_desktop(s: Smoke) -> None:
     s.check("business: tab is labelled as a sample", s.text("#ovtab-business") == "Sample business view")
     rows = page.locator("#bench-table tbody tr").count()
     s.check("business: sources panel lists every headline figure", rows == len(SAMPLE["benchmarks"]), f"{rows}")
+    bench_text = page.locator("#bench-table").text_content()
+    bench_links = set(page.eval_on_selector_all("#bench-table a[href^='https://']", "els => els.map(e => e.href)"))
     s.check(
-        "business: each figure is cited or labelled an assumption",
-        all(b["source"] or b["label"] in page.locator("#bench-table").text_content() for b in SAMPLE["benchmarks"]),
+        "business: each figure is cited with its links and quotes, or labelled derived or an assumption",
+        all(
+            all(src["url"] in bench_links and src["quote"] in bench_text for src in b["sources"])
+            if b["sources"]
+            else b["label"] in bench_text
+            for b in SAMPLE["benchmarks"]
+        ),
     )
     s.check("business: sample company labelled fictional", "fictional" in s.text(".sample-banner").lower())
     s.check("business: eight KPI tiles", page.locator(".tiles.kpis .tile").count() == 8)

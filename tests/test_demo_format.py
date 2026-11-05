@@ -50,7 +50,8 @@ def test_formats_under_a_french_locale():
         f"import * as f from {json.dumps((DEMO / 'format.js').as_uri())};"
         "console.log(JSON.stringify(["
         "f.usd(940), f.usd(1100), f.usd(180.5), f.usdCents(180), f.moneyShort(1.5e6), f.moneyShort(1462000),"
-        "f.moneyShort(93412), f.moneyShort(1.4e9), f.unitPrice(5.4), f.unitPrice(0.46), f.num(92400)]))"
+        "f.moneyShort(142369), f.moneyShort(1.4e9), f.unitPrice(8.01), f.unitPrice(0.44), f.unitPrice(0.5),"
+        "f.num(92400)]))"
     )
     env = {**os.environ, "LANG": "fr_FR.UTF-8", "LC_ALL": "fr_FR.UTF-8"}
     out = subprocess.run(
@@ -64,10 +65,11 @@ def test_formats_under_a_french_locale():
         "$180.00",
         "$1.5M",
         "$1.46M",
-        "$93K",
+        "$142K",
         "$1.4B",
-        "$5.40",
-        "$0.46",
+        "$8.01",
+        "$0.44",
+        "$0.50",
         "92,400",
     ]
     assert not any("USD" in g for g in got)
